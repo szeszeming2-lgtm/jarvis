@@ -1,6 +1,6 @@
 // Offline support for the web version: the interface is cached so JARVIS opens
 // without internet. Requests to Ollama (another origin) are never touched.
-const VERSION = 'jarvis-10e005c32a';
+const VERSION = 'jarvis-3216a6dd47';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/main.js', 'js/util.js', 'js/icons.js', 'js/host.js', 'js/store.js', 'js/ollama.js', 'js/markdown.js', 'js/calc.js',
@@ -9,6 +9,7 @@ const CORE = [
   'js/ui/panels.js', 'js/ui/wizard.js', 'js/ui/connect.js', 'js/ui/look.js', 'js/when.js', 'js/reminders.js',
   'js/webllm.js', 'js/lists.js', 'js/people.js', 'js/weather.js', 'js/ui/phone.js', 'js/ui/lists.js', 'js/ui/share.js',
   'js/reps.js', 'js/workout.js', 'js/converter.js', 'js/plugins.js', 'js/ui/workout.js', 'js/ui/plugins.js', 'js/ui/call.js',
+  'js/messaging.js', 'js/briefing.js', 'js/vision.js', 'js/sync.js', 'js/ui/circle.js', 'js/ui/sync.js',
   'assets/icon-192.png', 'assets/icon-512.png', 'assets/icon-maskable-512.png', 'assets/apple-touch-icon.png', 'assets/favicon-32.png',
 ];
 
@@ -34,6 +35,12 @@ self.addEventListener('fetch', (e) => {
   // Workout Coach body tracking (pinned engine + model): keep a copy for offline workouts.
   if (req.method === 'GET' && (req.url.startsWith('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.0/') || req.url.startsWith('https://storage.googleapis.com/mediapipe-models/pose_landmarker/'))) {
     e.respondWith(caches.open('jarvis-lib-mediapipe-1.2.0').then(async (c) => (await c.match(req.url)) || fetch(req).then((res) => { if (res.ok) c.put(req.url, res.clone()); return res; })));
+    return;
+  }
+  // Picture AI engine (pinned transformers.js + its WASM runtime): keep a copy for offline use.
+  // The model files themselves are kept by transformers.js in its own "transformers-cache".
+  if (req.method === 'GET' && (req.url.startsWith('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/') || req.url.startsWith('https://cdn.jsdelivr.net/npm/onnxruntime-web@'))) {
+    e.respondWith(caches.open('jarvis-lib-transformers-4.3.2').then(async (c) => (await c.match(req.url)) || fetch(req).then((res) => { if (res.ok) c.put(req.url, res.clone()); return res; })));
     return;
   }
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;

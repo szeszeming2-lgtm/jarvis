@@ -14,6 +14,7 @@ import { describeWhen } from './when.js';
 import './ui/lists.js';
 import './ui/workout.js';
 import './ui/plugins.js';
+import './ui/sync.js';
 import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
 import { checkForCall } from './ui/call.js';
@@ -75,6 +76,11 @@ async function boot() {
   bus.on('session.title', (s) => { if (s === sessions.state.current) $('#sessionTitle').value = s.title; });
   bus.on('wizard.open', openWizard);
   bus.on('look.start', (d) => look.start(d));
+  // Morning briefing, once a day after the set time (and on the first open after it).
+  import('./briefing.js').then((b) => b.startSchedule(async (brief) => {
+    assistant.announce(brief.md, { speak: settings.briefing?.speak !== false });
+    toast('Your morning briefing is ready.', { icon: 'coffee', ms: 6000 });
+  })).catch(console.error);
   bus.on('reminder.due', (r) => {
     const text = r.missed ? `While I was closed, a reminder came due: ${r.text}.` : `Reminder: ${r.text}.`;
     toast(text, { icon: 'bell', ms: 15000 });
@@ -118,7 +124,7 @@ const SUGGESTIONS = [
   ['cpu', 'System report', 'Give me a system status report'],
   ['clock', 'Set a 10 min timer', 'set a timer for 10 minutes'],
   ['broom', 'Tidy my Downloads', 'Organize my Downloads folder by file type'],
-  ['coffee', 'Morning briefing', '/brief'],
+  ['coffee', 'Morning briefing', 'good morning'],
   ['calculator', '18% tip on $64', 'what is 18% of 64'],
 ];
 /** Phones: a small "Today" card under the greeting (next reminders, list counts). */
@@ -168,10 +174,11 @@ function wirePhone() {
 }
 
 const PHONE_SUGGESTIONS = [
+  ['coffee', 'My day', "what's my day"],
+  ['home', 'Take me home', 'take me home'],
   ['sun', 'Weather', "what's the weather"],
   ['list', 'Shopping list', "what's on my shopping list"],
   ['bell', 'Remind me in 1 hour', 'remind me in 1 hour to take a break'],
-  ['cpu', 'System report', 'system report'],
   ['zap', 'Track my workout', 'track my workout'],
   ['puzzle', 'What should I add?', 'what should I add'],
 ];
@@ -281,6 +288,7 @@ function wireComposer() {
   send.addEventListener('click', () => (assistant.run.busy || voice.voice.speaking ? stopAll() : submit()));
   $('#attachBtn').addEventListener('click', attach);
   $('#lookBtn').addEventListener('click', () => look.start({ question: input.value.trim() }));
+  if (isMobile()) $('#lookBtn').replaceChildren(iconNode('camera'));
   // Pictures: paste (⌘V a screenshot), drag and drop, or the paperclip.
   input.addEventListener('paste', (e) => {
     const files = [...(e.clipboardData?.items || [])].filter((i) => i.type.startsWith('image/')).map((i) => i.getAsFile()).filter(Boolean);
@@ -331,7 +339,17 @@ const pending = [];
 function drawPending() {
   const box = $('#pending');
   box.hidden = !pending.length;
-  box.replaceChildren(...pending.map((p, i) => h('div', { class: 'pend', title: 'Will be sent with your next message' }, h('img', { src: p.thumb, alt: 'Picture to send' }),
+  // Tap a picture to circle part of it and ask.
+  const circleIt = async (i) => {
+    const { openAsk } = await import('./ui/circle.js');
+    const p = pending[i];
+    const r = await openAsk({ question: $('#input').value.trim(), source: { dataUrl: 'data:image/jpeg;base64,' + p.data } });
+    if (!r?.images) return;
+    pending.splice(i, 1); drawPending();
+    $('#input').value = '';
+    assistant.send(r.question, { images: r.images, context: r.context });
+  };
+  box.replaceChildren(...pending.map((p, i) => h('div', { class: 'pend', title: 'Tap to circle part of it. Sent with your next message.' }, h('img', { src: p.thumb, alt: 'Picture to send. Tap to circle part of it.', onclick: () => circleIt(i), style: { cursor: 'pointer' } }),
     h('button', { type: 'button', 'aria-label': 'Remove picture', onclick: () => { pending.splice(i, 1); drawPending(); } }, iconNode('x')))));
   $('#sendBtn').classList.toggle('ready', !!pending.length || !!$('#input').value.trim());
 }

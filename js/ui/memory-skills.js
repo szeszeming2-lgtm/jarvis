@@ -63,7 +63,7 @@ registerTab('skills', (body) => {
     mine.replaceChildren(...skills.all().map((sk) => h('div', { class: 'item' + (sk.enabled !== false ? ' on' : '') },
       h('span', { class: 'item-ic' }, iconNode(sk.icon || 'puzzle')),
       h('div', { class: 'item-main' },
-        h('div', { class: 'item-title' }, sk.name, h('span', { class: 'mono muted', text: '/' + sk.command }), h('span', { class: 'pill', text: sk.kind === 'routine' ? `Routine · ${sk.steps?.length || 0} steps` : 'Prompt' }), sk.trusted ? h('span', { class: 'pill warn', text: 'Runs without asking' }) : null),
+        h('div', { class: 'item-title' }, sk.name, h('span', { class: 'mono muted', text: '/' + sk.command }), h('span', { class: 'pill', text: sk.kind === 'routine' ? `Actions · ${sk.steps?.length || 0} steps` : sk.kind === 'link' ? 'Website' : 'Instructions' }), sk.trusted ? h('span', { class: 'pill warn', text: 'Runs without asking' }) : null),
         h('div', { class: 'item-sub', text: (sk.description || '') + (sk.triggers?.length ? ` · Say: “${sk.triggers.join('”, “')}”` : '') })),
       h('div', { class: 'item-actions' },
         toggle(sk.enabled !== false, (v) => skills.toggle(sk.id, v), `Enable ${sk.name}`),
@@ -72,7 +72,7 @@ registerTab('skills', (body) => {
     if (!skills.all().length) mine.append(h('div', { class: 'empty', text: 'No skills yet. Install one from the gallery or create your own.' }));
     gallery.replaceChildren(...skills.GALLERY.map((g) => h('div', { class: 'item' },
       h('span', { class: 'item-ic' }, iconNode(g.icon)),
-      h('div', { class: 'item-main' }, h('div', { class: 'item-title' }, g.name, h('span', { class: 'mono muted', text: '/' + g.command }), h('span', { class: 'pill', text: g.kind === 'routine' ? 'Routine' : 'Prompt' })), h('div', { class: 'item-sub', text: g.description })),
+      h('div', { class: 'item-main' }, h('div', { class: 'item-title' }, g.name, h('span', { class: 'mono muted', text: '/' + g.command }), h('span', { class: 'pill', text: g.kind === 'routine' ? 'Actions' : g.kind === 'link' ? 'Website' : 'Instructions' })), h('div', { class: 'item-sub', text: g.description })),
       h('div', { class: 'item-actions' }, skills.installed(g.id) ? h('span', { class: 'pill ok', text: 'Added' }) : h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { skills.install(g.id); toast(`Added ${g.name}`); } }, iconNode('plus'), 'Add')))));
   };
   const offs = [bus.on('skills', draw), bus.on('settings', (d) => { if (d.path.startsWith('skills')) draw(); })];
@@ -106,9 +106,10 @@ async function importSkillFile() {
   } catch (e) { toast(e.message, { bad: true }); }
 }
 
-/** Skill editor in a modal sheet. */
-function editSkill(existing) {
-  const sk = existing ? structuredClone(existing) : { name: '', command: '', description: '', icon: 'puzzle', kind: 'prompt', triggers: [], prompt: '', steps: [], trusted: false };
+/** Skill (plugin) editor in a modal sheet. */
+export function editSkill(existing, { kind = 'prompt' } = {}) {
+  const sk = existing ? structuredClone(existing) : { name: '', command: '', description: '', icon: kind === 'link' ? 'globe' : 'puzzle', kind, triggers: [], prompt: '', url: '', steps: [], trusted: false };
+  const urlRow = row('Web address', 'The page to open. Put {input} where your words go, e.g. https://www.youtube.com/results?search_query={input}', text(sk.url || '', (v) => (sk.url = v.trim()), { width: '100%', placeholder: 'https://…{input}', label: 'Web address' }), { stack: true });
   const layer = h('div', { class: 'sheet-layer', style: { zIndex: 75 } });
   const stepsBox = h('div', { class: 'list' });
   const promptRow = row('Instructions', 'What should JARVIS do? Use {input} for the text after the command, {date} for today, {name} for your name.', area(sk.prompt, (v) => (sk.prompt = v), { rows: 6, placeholder: 'e.g. Turn {input} into a polite text message I can send.' }), { stack: true });
@@ -130,7 +131,7 @@ function editSkill(existing) {
   };
   const stepsRow = row('Steps', 'Run in order. Each step follows your Permissions unless you allow the routine to run without asking.', stepsBox, { stack: true });
   const trustedRow = row('Run without asking', 'Skip confirmation cards for this routine’s steps. Terminal commands always ask.', toggle(sk.trusted, (v) => (sk.trusted = v), 'Run without asking'));
-  const showKind = () => { promptRow.hidden = sk.kind !== 'prompt'; stepsRow.hidden = trustedRow.hidden = sk.kind !== 'routine'; };
+  const showKind = () => { promptRow.hidden = sk.kind !== 'prompt'; stepsRow.hidden = trustedRow.hidden = sk.kind !== 'routine'; urlRow.hidden = sk.kind !== 'link'; };
   const iconSel = h('select', { class: 'field', 'aria-label': 'Icon' }, ...iconNames.map((n) => { const o = h('option', { value: n, text: n }); if (n === sk.icon) o.selected = true; return o; }));
   iconSel.addEventListener('change', () => (sk.icon = iconSel.value));
   const close = () => layer.remove();
@@ -138,25 +139,26 @@ function editSkill(existing) {
     if (!sk.name.trim()) return toast('Give the skill a name.', { bad: true });
     if (sk.kind === 'prompt' && !sk.prompt.trim()) return toast('Write the instructions.', { bad: true });
     if (sk.kind === 'routine' && !sk.steps.length) return toast('Add at least one step.', { bad: true });
+    if (sk.kind === 'link' && !skills.safeLink(sk.url)) return toast('The web address must start with https://', { bad: true });
     sk.triggers = (sk._triggers ?? sk.triggers.join(', ')).split(',').map((t) => t.trim()).filter(Boolean);
     delete sk._triggers;
     skills.upsert(sk);
-    toast('Skill saved');
+    toast('Plugin saved');
     close();
   };
   layer.append(h('div', { class: 'wizard glass', style: { width: 'min(680px, 100%)', textAlign: 'left' }, role: 'dialog', 'aria-modal': 'true' },
-    h('h2', { style: { fontSize: '22px', margin: '0 0 14px' }, text: existing ? 'Edit skill' : 'Create a skill' }),
+    h('h2', { style: { fontSize: '22px', margin: '0 0 14px' }, text: existing ? 'Edit plugin' : 'Make a plugin' }),
     rows(
       row('Name', '', text(sk.name, (v) => (sk.name = v), { width: '240px', placeholder: 'e.g. Text message helper', label: 'Skill name' })),
       row('Command', 'Type /command to run it.', text(sk.command, (v) => (sk.command = skills.slug(v)), { width: '160px', placeholder: 'texthelp', label: 'Command' })),
       row('Spoken triggers', 'Optional phrases, separated by commas.', text(sk.triggers.join(', '), (v) => (sk._triggers = v), { width: '240px', placeholder: 'e.g. help me text', label: 'Triggers' })),
       row('Description', '', text(sk.description, (v) => (sk.description = v), { width: '240px', label: 'Description' })),
       row('Icon', '', iconSel),
-      row('Type', '', seg(sk.kind, [['prompt', 'Prompt'], ['routine', 'Routine']], (v) => { sk.kind = v; showKind(); })),
-      promptRow, stepsRow, trustedRow),
+      row('Type', 'Instructions for the AI, a row of actions, or a website shortcut.', seg(sk.kind, [['prompt', 'Instructions'], ['routine', 'Actions'], ['link', 'Website']], (v) => { sk.kind = v; showKind(); })),
+      promptRow, stepsRow, trustedRow, urlRow),
     h('div', { class: 'flex', style: { justifyContent: 'flex-end', marginTop: '16px' } },
       h('button', { class: 'btn btn-ghost', type: 'button', text: 'Cancel', onclick: close }),
-      h('button', { class: 'btn btn-primary', type: 'button', text: 'Save skill', onclick: save }))));
+      h('button', { class: 'btn btn-primary', type: 'button', text: 'Save plugin', onclick: save }))));
   drawSteps();
   showKind();
   layer.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });

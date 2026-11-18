@@ -17,14 +17,22 @@ export function find(name) {
     || people.find((p) => norm(p.name).split(/\s+/)[0] === q);
 }
 
-export function upsert({ name, phone, aliases = [] }) {
+export const HANDLES = ['discord', 'telegram', 'skype', 'teams', 'messenger', 'whatsapp'];
+
+/** Add or update someone. phone is optional when an app handle is given. */
+export function upsert({ name, phone = '', aliases = [], allowEmpty = false, ...handles }) {
   name = String(name || '').trim().replace(/^(my|our)\s+/i, '');
   phone = String(phone || '').trim();
-  if (!name || !phone) throw new Error('A name and a number are needed.');
-  if (!/^\+?[\d\s().-]{5,20}$/.test(phone) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(phone)) throw new Error('That number doesn’t look right.');
+  const extra = Object.fromEntries(Object.entries(handles).filter(([k, v]) => HANDLES.includes(k) && String(v || '').trim()).map(([k, v]) => [k, String(v).trim()]));
+  if (!name) throw new Error('A name is needed.');
+  if (!allowEmpty && !phone && !Object.keys(extra).length && !find(name)) throw new Error('A number (or an app username) is needed.');
+  if (phone && !/^\+?[\d\s().-]{5,20}$/.test(phone) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(phone)) throw new Error('That number doesn’t look right.');
   const existing = find(name);
-  if (existing) { existing.phone = phone; existing.aliases = [...new Set([...(existing.aliases || []), ...aliases])]; }
-  else people.push({ id: uid('p'), name: name.charAt(0).toUpperCase() + name.slice(1), phone, aliases });
+  if (existing) {
+    if (phone) existing.phone = phone;
+    Object.assign(existing, extra);
+    existing.aliases = [...new Set([...(existing.aliases || []), ...aliases])];
+  } else people.push({ id: uid('p'), name: name.charAt(0).toUpperCase() + name.slice(1), phone, aliases, ...extra });
   save();
   return find(name);
 }

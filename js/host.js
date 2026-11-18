@@ -146,6 +146,13 @@ const browser = {
   },
   'app.openExternal': async ({ url }) => { window.open(url, '_blank', 'noopener'); return true; },
   'app.setHotkeys': async () => false,
+  // Open an app link (Discord, WhatsApp, FaceTime, Maps…). Web links open in a new tab.
+  'app.openLink': async ({ url }) => {
+    if (/^https?:/i.test(url)) { const w = window.open(url, '_blank'); if (!w) location.href = url; else try { w.opener = null; } catch {} }
+    else location.href = url;
+    return true;
+  },
+  'app.copy': async ({ text }) => { await navigator.clipboard.writeText(text); return true; },
   // Phones: open apps through their links (Safari may ask "Open in …?").
   'tool.open_app': async ({ name }) => {
     const key = String(name || '').toLowerCase().trim().replace(/^the\s+/, '').replace(/\s+app$/, '');

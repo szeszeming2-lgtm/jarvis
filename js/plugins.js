@@ -20,8 +20,9 @@ export const PLUGINS = [
   { id: 'converter', name: 'Unit Converter', icon: 'calculator', groups: ['convert'], tryText: 'convert 5 miles to km', desc: 'Lengths, weights, cooking, temperatures, speed, data.' },
   { id: 'timers', name: 'Timers & Maths', icon: 'clock', groups: ['basics'], tryText: 'set a timer for 5 minutes', desc: 'Countdowns, quick maths and tips: “what is 18% of 64”.' },
   { id: 'system', name: 'System Report', icon: 'cpu', groups: ['status'], tryText: 'system report', desc: 'Your device, storage, network, AI and JARVIS stats.' },
-  { id: 'look', name: 'What’s this?', icon: 'eye', groups: ['look'], tryText: '', desc: 'Identify things in a photo or on screen (needs a vision model).', needs: () => !mobile() },
-  { id: 'briefing', name: 'Morning Briefing', icon: 'coffee', skill: 'brief', tryText: '/brief', desc: 'A short plan for your day.' },
+  { id: 'look', name: 'Circle to Ask', icon: 'lasso', groups: ['look'], tryText: 'what is this', desc: 'Take a photo, pick a picture or grab your screen, circle anything and ask about it. Runs on this device.' },
+  { id: 'briefing', name: 'Morning Briefing', icon: 'coffee', groups: ['briefing'], tryText: 'good morning', desc: 'Every morning: the weather and what you need to do today (calendar, reminders, to-do list). Spoken, and texted to you from the Mac app.' },
+  { id: 'home', name: 'Take Me Home', icon: 'home', groups: ['home'], tryText: 'take me home', open: 'general', desc: 'Directions home from wherever you are, in Apple or Google Maps. Your address stays on this device.' },
   { id: 'translate', name: 'Translator', icon: 'language', skill: 'translate', tryText: '/translate Spanish: good morning', desc: 'Translate anything into another language.' },
 ];
 
@@ -30,6 +31,7 @@ export const available = () => PLUGINS.filter((p) => !p.needs || p.needs());
 export function isOn(p) {
   if (p.skill) { const sk = skills.find(p.skill); return !!sk && sk.enabled !== false; }
   const off = settings.skills?.disabledGroups || [];
+  if (p.id === 'briefing' && settings.briefing?.on === false) return false;
   return p.groups.every((g) => !off.includes(g));
 }
 
@@ -40,6 +42,7 @@ export function setOn(p, on) {
     return;
   }
   const off = new Set(settings.skills?.disabledGroups || []);
+  if (p.id === 'briefing') set('briefing.on', on);
   for (const g of p.groups) on ? off.delete(g) : off.add(g);
   set('skills.disabledGroups', [...off]);
 }
@@ -63,7 +66,8 @@ export async function recommend(n = 3) {
   if (!people.all().length) add('contact', 'Save the people you message most, then say “text Mom I’m on my way”.', 'setup', 4);
   if (!used.has('apps')) add('apps', 'Say “open Spotify” or “open Maps” to jump straight into your apps.', 'try', 3);
   if (!used.has('converter')) add('converter', 'Cooking or travelling? “How many grams in a pound?”', 'try', 2);
-  if (!skills.find('brief')) add('briefing', 'Start each day with a short plan.', 'enable', 2);
+  if (settings.briefing?.on === false) add('briefing', 'Start each day with the weather and what you need to do.', 'enable', 2);
+  if (!settings.profile?.home) add('home', 'Save your home address once, then just say “take me home”.', 'setup', 3);
   if (!used.has('system')) add('system', 'Check your storage, battery and AI at a glance.', 'try', 1);
   return out.sort((a, b) => b.score - a.score).slice(0, n);
 }

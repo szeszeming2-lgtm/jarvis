@@ -28,7 +28,7 @@ async function getLandmarker(onStatus) {
 
 const LINKS = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
 
-/** Open the coach. exercise: squats | pushups | jacks | curls | plank */
+/** Open the coach. exercise: a key of EXERCISES (squats, pushups, lunges, plank, …). */
 export async function openCoach(exercise = 'squats') {
   if (!EXERCISES[exercise]) exercise = 'squats';
   closeSheet();
@@ -43,7 +43,7 @@ export async function openCoach(exercise = 'squats') {
   const status = h('div', { class: 'coach-status', text: 'Starting the camera…' });
   const chips = h('div', { class: 'coach-chips' });
   const voiceOn = { on: settings.voice.speak !== 'never' };
-  const drawChips = () => chips.replaceChildren(...Object.entries(EXERCISES).map(([k, v]) => h('button', { class: 'suggestion' + (k === exercise ? ' on' : ''), type: 'button', text: v.label, onclick: () => { exercise = k; counter = new RepCounter(k); started = Date.now(); label.textContent = v.label; count.textContent = k === 'plank' ? '0:00' : '0'; drawChips(); status.textContent = v.how; } })));
+  const drawChips = () => chips.replaceChildren(...Object.entries(EXERCISES).map(([k, v]) => h('button', { class: 'suggestion' + (k === exercise ? ' on' : ''), type: 'button', text: v.label, onclick: () => { exercise = k; counter = new RepCounter(k); started = Date.now(); label.textContent = v.label; count.textContent = EXERCISES[k].hold ? '0:00' : '0'; drawChips(); status.textContent = v.how; } })));
   drawChips();
   const finish = async (saveIt) => {
     running = false;
@@ -54,7 +54,7 @@ export async function openCoach(exercise = 'squats') {
     if (!saveIt) return;
     const r = counter.reps, sec = counter.holdMs ? Math.round(counter.holdMs / 1000) : 0;
     if (!r && !sec) { toast('Nothing to save yet.'); return; }
-    const e = workout.add(exercise === 'plank' ? { exercise: 'plank', seconds: sec, source: manual ? 'manual' : 'camera' } : { exercise: EXERCISES[exercise].label, reps: r, seconds: Math.round((Date.now() - started) / 1000), source: manual ? 'manual' : 'camera' });
+    const e = workout.add(EXERCISES[exercise].hold ? { exercise: EXERCISES[exercise].label.toLowerCase(), seconds: sec, source: manual ? 'manual' : 'camera' } : { exercise: EXERCISES[exercise].label, reps: r, seconds: Math.round((Date.now() - started) / 1000), source: manual ? 'manual' : 'camera' });
     const s = workout.summary(7);
     const { say } = await import('../assistant.js');
     say(`Track my ${EXERCISES[exercise].label.toLowerCase()}`, `Nice work! Saved **${workout.describe(e)}**.${s.streak > 1 ? ` That’s a ${s.streak}-day streak. 🔥` : ''} This week: ${s.sessions} workout${s.sessions === 1 ? '' : 's'}.`);
@@ -73,7 +73,7 @@ export async function openCoach(exercise = 'squats') {
     status,
     h('div', { class: 'coach-actions' },
       tap,
-      h('button', { class: 'btn btn-ghost', type: 'button', text: 'Reset', onclick: () => { counter = new RepCounter(exercise); started = Date.now(); count.textContent = exercise === 'plank' ? '0:00' : '0'; } }),
+      h('button', { class: 'btn btn-ghost', type: 'button', text: 'Reset', onclick: () => { counter = new RepCounter(exercise); started = Date.now(); count.textContent = EXERCISES[exercise].hold ? '0:00' : '0'; } }),
       h('button', { class: 'btn btn-primary', type: 'button', onclick: () => finish(true) }, iconNode('check'), 'Save workout')),
     h('div', { class: 'coach-note', text: 'The camera picture stays on this device. Nothing is recorded or uploaded.' }));
   document.body.append(layer);
@@ -134,14 +134,14 @@ export async function openCoach(exercise = 'squats') {
       g.shadowBlur = 0;
     }
     const r = counter.update(pts, W / H, now);
-    if (exercise === 'plank') {
+    if (EXERCISES[exercise].hold) {
       count.textContent = `${Math.floor(r.holdSec / 60)}:${String(r.holdSec % 60).padStart(2, '0')}`;
       if (voiceOn.on && r.holdSec && r.holdSec % 10 === 0 && r.holdSec !== lastSpoken) { lastSpoken = r.holdSec; voice.speak(`${r.holdSec} seconds`); }
     } else {
       count.textContent = String(r.reps);
       if (r.counted) { count.classList.remove('pop'); void count.offsetWidth; count.classList.add('pop'); if (voiceOn.on) { voice.stopSpeaking(); voice.speak(String(r.reps)); } }
     }
-    status.textContent = r.visible ? (r.tip || (exercise === 'plank' ? 'Hold it!' : r.reps ? 'Keep going!' : 'Go!')) : r.tip;
+    status.textContent = r.visible ? (r.tip || (EXERCISES[exercise].hold ? 'Hold it!' : r.reps ? 'Keep going!' : 'Go!')) : r.tip;
   };
   loop();
 }
@@ -165,7 +165,7 @@ registerTab('workout', (body) => {
   body.append(
     callout('<b>Workout Coach.</b> Your camera watches your body and counts your reps. It runs on this device only: nothing is recorded or uploaded. Prop your phone up so your whole body is in view.', { icon: 'zap' }),
     section('Start', '', h('div', { class: 'suggestions', style: { justifyContent: 'flex-start' } },
-      ...Object.entries(EXERCISES).map(([k, v]) => h('button', { class: 'suggestion', type: 'button', onclick: () => openCoach(k) }, iconNode(k === 'plank' ? 'clock' : 'zap'), v.label)))),
+      ...Object.entries(EXERCISES).map(([k, v]) => h('button', { class: 'suggestion', type: 'button', onclick: () => openCoach(k) }, iconNode(v.icon || 'zap'), v.label)))),
     section('This week', '', sum),
     section('History', '', hist),
   );

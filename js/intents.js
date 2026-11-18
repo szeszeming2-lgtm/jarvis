@@ -5,6 +5,8 @@ import { parseWhen, describeWhen } from './when.js';
 import { summary as weatherSummary } from './weather.js';
 import { summaryText as workoutSummaryText } from './workout.js';
 import { knows as knowsUnit } from './converter.js';
+import { APPS, normApp } from './messaging.js';
+import { HANDLES } from './people.js';
 
 const listWords = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]);
 
@@ -28,6 +30,9 @@ export function match(raw, { customSkills = [] } = {}) {
   const low = t.toLowerCase();
   if (!low) return null;
 
+  // Morning briefing: real weather, calendar, reminders and to-dos (before the old "brief" skill).
+  if (/^(?:good morning|morning|morning brief(?:ing)?|brief me|my briefing|daily briefing|\/brief|what'?s my day(?: look)?(?: like)?(?: today)?|what(?:'s| is) (?:on )?(?:my day|today|my plate today|my schedule today)|what do i (?:have|need) to do today|what'?s happening today|plan my day|my day)(?:,? (?:jarvis|computer|sir|ma'?am|boss|buddy))?$/i.test(low)) return { tool: 'morning_briefing', args: {} };
+
   // Custom skill triggers ("/name text" or a trigger phrase).
   for (const sk of customSkills) {
     const cmd = '/' + sk.command;
@@ -40,6 +45,8 @@ export function match(raw, { customSkills = [] } = {}) {
 
   if (/^(stop|cancel|be quiet|quiet|shush|shut up|enough|never ?mind|that'?s enough)$/i.test(low)) return { local: 'stop' };
   if (/^(new (chat|conversation)|start over|clear (the )?chat)$/i.test(low)) return { local: 'newchat' };
+  if (/^(link|sync|connect|pair) (my |the |all my |both )?(devices|phone|iphone|mac|computer|laptop)( and (my )?(phone|iphone|mac|computer|laptop))?( together)?$|^(sign in|log in|login|signin)$|^(make )?(everything|it) the same on (all )?(my )?(devices|phone and (mac|computer))$/i.test(low)) return { local: 'open', tab: 'sync', say: 'Here’s Link devices. Send from one device and receive on the other, and they’ll match. No account needed.' };
+  if (/^(open |show )?(the )?(plugins?|plugin store|add (a )?plugins?)$/i.test(low)) return { local: 'open', tab: 'plugins', say: 'Here are your plugins and the plugin store.' };
   if (/^(share (jarvis|this app|the app|the link|your link|you|the url)|(send|give) (me )?(the|your) (link|url)|what'?s (the|your) (link|url)|copy (the|your) (link|url))$/i.test(low)) return { local: 'share' };
 
   // Reminders: "remind me to X in 10 minutes", "remind me at 5pm to X", "text me tomorrow at 9 to X"
@@ -77,6 +84,15 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((r = t.match(/^(?:my (?:home )?(?:city|town) is|i live in|set my (?:home )?city to) (.+)$/i))) return { tool: 'set_home_city', args: { place: r[1] } };
   if ((r = low.match(/^(?:what(?:'s| is) the |how(?:'s| is) the |show me the |get the )?(?:weather|forecast|temperature)(?: like)?(?: (?:today|now|outside|tomorrow|this week))?(?: (?:in|for|at) (.+?))?(?: (?:today|now|tomorrow))?$|^(?:is it|will it) (?:going to )?(?:rain|snow|be (?:hot|cold|sunny|windy))(?: today| tomorrow)?(?: in (.+?))?$|^do i need an umbrella(?: today| tomorrow)?(?: in (.+?))?$|^how (?:hot|cold|warm) is it(?: outside)?(?: in (.+?))?$/))) return { tool: 'get_weather', args: { place: (r[1] || r[2] || r[3] || r[4] || '').trim() } };
 
+  // Home: "take me home", "walk me home", "bring me home by bus", "my home address is …"
+  // An address has a number, a comma or several words; "my home is Toronto" alone is a city.
+  if ((r = t.match(/^(?:my home(?: address)? is|my address is|set my home(?: address)?(?: to| as)?|save my home(?: address)?(?: as)?|home is|i live at) (?:at |in )?(.+)$/i)) && (/\d|,/.test(r[1]) || r[1].split(/\s+/).length >= 3)) return { tool: 'set_home_address', args: { address: r[1] } };
+  if ((r = low.match(/^(?:take|bring|get|send|walk|drive|guide|navigate|lead) me (?:back )?home(?: (?:by|on) (car|bus|train|transit|foot|bike|walking|subway|metro))?$|^(?:directions|navigate|route|the way|show me the way) (?:to )?home(?: (?:by|on) (car|bus|train|transit|foot|bike|subway|metro))?$|^how do i get (?:back )?home$|^i (?:want|need) to go home$|^(?:let'?s )?go home$/))) {
+    const by = r[1] || r[2] || (/^walk/.test(low) ? 'foot' : /^drive/.test(low) ? 'car' : '');
+    const mode = { car: 'drive', bus: 'transit', train: 'transit', transit: 'transit', subway: 'transit', metro: 'transit', foot: 'walk', walking: 'walk', bike: 'cycle' }[by];
+    return { tool: 'go_home', args: mode ? { mode } : {} };
+  }
+
   // Your own number, so JARVIS can text and call you.
   if ((r = t.match(/^(?:my (?:phone |cell |mobile |iphone )?number is|my phone is|save my (?:phone )?number(?: as)?|set my (?:phone )?number(?: to)?|text me at|call me at)\s*(\+?\d[\d\s().-]{4,}|[^\s@]+@[^\s@]+\.[^\s@]+)$/i))) return { tool: 'set_my_number', args: { number: r[1].trim() } };
   // JARVIS calls you: "call me now", "call me in 10 minutes about the bank", "call me at 7am to wake me up", "wake me up at 7"
@@ -92,6 +108,28 @@ export function match(raw, { customSkills = [] } = {}) {
   // "call me Alex" means a name, not a phone call.
   if ((r = t.match(/^(?:call me|my name is|i'?m called) (?!(?:now|later|back|in|at|tomorrow|tonight|today|when|soon|please|up|about|to)\b)([\p{L}][\p{L}'’ -]{0,30})$/iu)) && r[1].split(/\s+/).length <= 3) return { local: 'callme', name: r[1].trim() };
 
+  // Other apps: "call Sam on Discord", "video call Mom on WhatsApp", "whatsapp Sam saying hi", "text Jo on Telegram: hi"
+  const APPW = '(discord|whats ?app|telegram|skype|(?:microsoft |ms )?teams|(?:facebook )?messenger|signal|face ?time|imessage|messages)';
+  const SAY = '(?:\\s*:\\s*|\\s+saying\\s+|\\s+that says\\s+|\\s+that\\s+|\\s+to say\\s+)';
+  const appOf = (w) => normApp(w.toLowerCase().replace(/^face ?time$/, 'facetime').replace(/^whats ?app$/, 'whatsapp').replace(/^(?:microsoft |ms )?teams$/, 'teams').replace(/^(?:facebook )?messenger$/, 'messenger'));
+  if ((r = t.match(new RegExp(`^save (.+?)['’]s? ${APPW}(?: (?:link|username|user ?name|name|handle|id|number|email))?(?: as| is|:)? (\\S+)$`, 'i'))) || (r = t.match(new RegExp(`^(.+?)['’]s ${APPW}(?: (?:link|username|user ?name|name|handle|id|number|email))? is (\\S+)$`, 'i')))) {
+    const app = appOf(r[2]);
+    if (app && HANDLES.includes(app)) return { tool: 'save_contact', args: { name: r[1].replace(/^my /i, ''), app, handle: r[3] } };
+  }
+  if ((r = t.match(new RegExp(`^(video call|video chat|call|phone|ring|voice call) (.+?) (?:on|with|using|over|via) ${APPW}$`, 'i')))) {
+    const app = appOf(r[3]);
+    if (app && APPS[app].call) return { tool: 'make_call', args: { to: r[2].replace(/^my /i, ''), app, video: /video/i.test(r[1]) } };
+  }
+  if ((r = t.match(/^(?:video call|video chat|facetime video) (.+)$/i)) && r[1].split(/\s+/).length <= 4) return { tool: 'make_call', args: { to: r[1].replace(/^my /i, ''), app: 'facetime', video: true } };
+  if ((r = t.match(new RegExp(`^(?:text|message|send (?:a )?(?:text|message) to|dm) (.+?) (?:on|with|using|over|via|in) ${APPW}${SAY}(.+)$`, 'i')))) {
+    const app = appOf(r[2]);
+    if (app && APPS[app].text) return { tool: 'send_text', args: { to: r[1].replace(/^my /i, ''), message: r[3], app } };
+  }
+  if ((r = t.match(new RegExp(`^(whats ?app|telegram|discord|signal|messenger|skype|teams|dm) (.+?)${SAY}(.+)$`, 'i')))) {
+    const app = appOf(r[1]) || 'discord';
+    if (APPS[app]?.text) return { tool: 'send_text', args: { to: r[2].replace(/^my /i, ''), message: r[3], app } };
+  }
+
   // Texts: "text Mom saying I'm on my way", "message +1 555 0100: hi", "text me buy milk"
   if ((r = t.match(/^(?:text|message|imessage|send (?:a )?(?:text|message) to) (.+?)(?:\s*:\s*|\s+saying\s+|\s+that says\s+|\s+that\s+)(.+)$/i))) return { tool: 'send_text', args: { to: r[1].replace(/^my /i, ''), message: r[2] } };
   if ((r = t.match(/^text me (.+)$/i))) return { tool: 'send_text', args: { to: 'me', message: r[1] } };
@@ -99,7 +137,8 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((r = t.match(/^(call|phone|ring|dial|facetime)(?: up)? (.+)$/i)) && !/^(me|it|that|this|off|back)\b/i.test(r[2]) && r[2].split(/\s+/).length <= 4) return { tool: 'make_call', args: { to: r[2].replace(/^my /i, ''), facetime: /facetime/i.test(r[1]) } };
 
   // Identify something on screen
-  if (/^(what('?s| is) (this|that)( on (my |the )?screen)?|identify (this|that|something)( on (my |the )?screen)?|what am i (looking|pointing) at|look at (my |the )?screen|what('?s| is) on (my |the )?screen|explain (this|what i'?m pointing at))$/.test(low)) return { local: 'look' };
+  if (/^(what('?s| is) (this|that)( on (my |the )?screen)?|identify (this|that|something)( on (my |the )?screen)?|what am i (looking|pointing) at|look at (my |the )?screen|what('?s| is) on (my |the )?screen|explain (this|what i'?m pointing at)|circle to ask|circle (something|it|this)|ask about (a |this |my )?(photo|picture|screen))$/.test(low)) return { local: 'look', source: /screen/.test(low) ? 'screen' : null };
+  if (/^(use (the |my )?camera|ask (with|using) (the |my )?camera|look (at this )?(with|through) (the |my )?camera|what('?s| is) (this|that) (in|on) (the |my )?camera|take a (photo|picture) and (tell me|ask)|scan (this|it))$/.test(low)) return { local: 'look', source: 'camera' };
 
   // Time and date
   if (/^(what('?s| is) the )?time( is it)?( now)?$|^what time is it( now)?$|^tell me the time$/.test(low)) return { tool: 'get_datetime', args: {}, say: 'time' };
@@ -129,9 +168,13 @@ export function match(raw, { customSkills = [] } = {}) {
   if (/^(what should i (add|try|use|turn on)( next)?|(any )?(recommendations?|suggestions?)|recommend (me )?(something|plugins?|features?)|what (plugins|features) (should i|do you) (add|have|recommend)|(show|open) (my )?plugins|plugins|what else can you do)$/.test(low)) return { local: 'recommend' };
 
   // Workouts: "track my squats", "open the camera", "log 3 sets of 10 push-ups", "I ran 5 km in 30 minutes"
-  const EX = { squat: 'squats', squats: 'squats', pushup: 'pushups', pushups: 'pushups', 'push-up': 'pushups', 'push-ups': 'pushups', 'push up': 'pushups', 'push ups': 'pushups', 'press ups': 'pushups', 'press-ups': 'pushups', 'jumping jack': 'jacks', 'jumping jacks': 'jacks', jacks: 'jacks', curl: 'curls', curls: 'curls', 'bicep curls': 'curls', 'bicep curl': 'curls', plank: 'plank', planks: 'plank' };
+  const EX = { squat: 'squats', squats: 'squats', pushup: 'pushups', pushups: 'pushups', 'push-up': 'pushups', 'push-ups': 'pushups', 'push up': 'pushups', 'push ups': 'pushups', 'press ups': 'pushups', 'press-ups': 'pushups', 'jumping jack': 'jacks', 'jumping jacks': 'jacks', jacks: 'jacks', curl: 'curls', curls: 'curls', 'bicep curls': 'curls', 'bicep curl': 'curls', plank: 'plank', planks: 'plank',
+    lunge: 'lunges', lunges: 'lunges', situp: 'situps', situps: 'situps', 'sit-up': 'situps', 'sit-ups': 'situps', 'sit up': 'situps', 'sit ups': 'situps', crunch: 'situps', crunches: 'situps',
+    'shoulder press': 'press', 'shoulder presses': 'press', 'overhead press': 'press', press: 'press', 'lateral raise': 'raises', 'lateral raises': 'raises', 'side raises': 'raises', raises: 'raises',
+    'high knees': 'knees', 'high knee': 'knees', 'glute bridge': 'bridges', 'glute bridges': 'bridges', bridges: 'bridges', bridge: 'bridges', 'hip thrusts': 'bridges',
+    'wall sit': 'wallsit', 'wall sits': 'wallsit', burpee: 'burpees', burpees: 'burpees', pullup: 'pullups', pullups: 'pullups', 'pull-up': 'pullups', 'pull-ups': 'pullups', 'pull up': 'pullups', 'pull ups': 'pullups', 'chin ups': 'pullups', 'chin-ups': 'pullups' };
   if (/^(?:start|begin|open|let'?s do|do)(?: a| my| the)? (?:workout|exercise|training|workout coach)$|^(?:track|count|watch|coach) my (?:workout|exercise|reps|training)$|^open (?:the |my )?camera(?: (?:and|to) (?:track|count|watch) (?:my )?(?:workout|reps|exercise))?$|^workout(?: coach)?$|^(?:let'?s )?work ?out$/.test(low)) return { tool: 'start_workout', args: {} };
-  if ((r = low.match(/^(?:track|count|watch|coach|start|let'?s do|do)(?: my| some)? (squats?|push-? ?ups?|press-? ?ups|jumping jacks?|jacks|(?:bicep )?curls?|planks?)(?: with (?:the )?camera)?$/))) return { tool: 'start_workout', args: { exercise: EX[r[1].replace(/\s+/g, ' ')] || EX[r[1].replace(/[- ]/g, '')] || 'squats' } };
+  if ((r = low.match(/^(?:track|count|watch|coach|start|let'?s do|do)(?: my| some)? (squats?|push-? ?ups?|press-? ?ups|jumping jacks?|jacks|(?:bicep )?curls?|planks?|lunges?|sit-? ?ups?|crunch(?:es)?|(?:shoulder |overhead )press(?:es)?|(?:lateral |side )raises?|high knees?|(?:glute )?bridges?|hip thrusts|wall sits?|burpees?|pull-? ?ups?|chin-? ?ups)(?: with (?:the )?camera)?$/))) return { tool: 'start_workout', args: { exercise: EX[r[1].replace(/\s+/g, ' ')] || EX[r[1].replace(/[- ]/g, '')] || 'squats' } };
   if ((r = low.match(/^(?:log|record|add|i did|i just did|did|just did)\s+(?:(\d+)\s*(?:sets?|x)\s*(?:of\s*)?)?(\d+)\s+([a-z][a-z -]{1,24}?)(?:\s+(?:at|with)\s+(\d+(?:\.\d+)?)\s*(kg|kgs|kilos?|lbs?|pounds?))?$/)) && !/\b(minutes?|mins?|hours?|reminders?|items?|things?)\b/.test(r[3])) return { tool: 'log_workout', args: { exercise: r[3], reps: +r[2], sets: r[1] ? +r[1] : undefined, weight: r[4] ? +r[4] : undefined, unit: r[5] ? (/^(lb|pound)/.test(r[5]) ? 'lb' : 'kg') : undefined } };
   if ((r = low.match(/^(?:i )?(?:just )?(ran|run|jogged|walked|cycled|biked|rode|swam)\s+(\d+(?:\.\d+)?)\s*(km|kms|kilometers?|kilometres?|miles?|mi)(?:\s+in\s+(\d+)\s*(?:min|mins|minutes))?$/))) return { tool: 'log_workout', args: { exercise: { ran: 'running', run: 'running', jogged: 'running', walked: 'walking', cycled: 'cycling', biked: 'cycling', rode: 'cycling', swam: 'swimming' }[r[1]], km: /^mi/.test(r[3]) ? Math.round(+r[2] * 1.609344 * 100) / 100 : +r[2], minutes: r[4] ? +r[4] : undefined } };
   if ((r = low.match(/^(?:i )?(?:just )?(?:did|worked out|exercised|trained|did yoga|ran|walked|cycled|swam|stretched)(?: for)? (\d+)\s*(?:min|mins|minutes)(?: of ([a-z ]{2,24}))?$/))) return { tool: 'log_workout', args: { exercise: r[2] || (/yoga/.test(low) ? 'yoga' : /ran/.test(low) ? 'running' : /walk/.test(low) ? 'walking' : /cycl/.test(low) ? 'cycling' : /swam/.test(low) ? 'swimming' : /stretch/.test(low) ? 'stretching' : 'workout'), minutes: +r[1] } };
@@ -218,21 +261,27 @@ export function reply(intent, res, name = 'JARVIS') {
     case 'call_me': return r.sent ? `Calling you now, check your iPhone. 📞` : `Messages opened with the call link ready. Press Send to ring your iPhone.`;
     case 'set_my_number': return `Got it. I’ll text and call you at **${r.number}**. It’s saved only on this device. Try “text me hello” or “call me in 1 minute”.`;
     case 'set_reminder': if (intent.args.call_me) return `I’ll call you ${r.when}: **${r.text}**.${r.callNote ? ' ' + r.callNote : ''}`;
-      return `I’ll remind you ${r.when}${intent.args.text_me ? ' and send you a text' : ''}: **${r.text}**.${r.inSystemReminders ? ' It’s in your Reminders app too, so your phone will remind you as well.' : ''}`;
+      return `I’ll remind you ${r.when}${r.texts ? ' and text you' : ''}: **${r.text}**.${r.inSystemReminders ? ' It’s in your Reminders app too, so your phone will remind you as well.' : ''}`;
     case 'list_reminders': return r.count ? `You have ${r.count} upcoming reminder${r.count === 1 ? '' : 's'}:\n\n${r.reminders.map((x) => `- **${x.text}** — ${x.when}`).join('\n')}` : 'You have no upcoming reminders.';
     case 'cancel_reminder': return `Cancelled ${r.cancelled} reminder${r.cancelled === 1 ? '' : 's'}.`;
-    case 'send_text': return r.sent ? `Message sent to ${r.to}.` : `Your messages app is open with the text to ${r.to}. Press Send when you’re ready.`;
-    case 'make_call': return `Calling ${r.to}.`;
+    case 'send_text': if (r.app) return r.how === 'prefills' ? `${r.app} is open with your message to ${r.to}. Press Send.` : `${r.app} is open on your chat with ${r.to}. Your message is copied, so paste it and press Send.`;
+      return r.sent ? `Message sent to ${r.to}.` : `Your messages app is open with the text to ${r.to}. Press Send when you’re ready.`;
+    case 'make_call': if (r.how === 'opens') return `${r.app} is open on your chat with ${r.to}. Tap the ${intent.args.video ? 'video' : 'call'} button there (${r.app} doesn’t let other apps start calls).`;
+      return `Calling ${r.to}${r.app && r.app !== 'Phone' ? ` on ${r.app}` : ''}.`;
     case 'add_to_list': return r.added.length ? `Added ${listWords(r.added)} to your ${r.list} list. ${r.count} item${r.count === 1 ? '' : 's'} on it now.` : `That’s already on your ${r.list} list.`;
     case 'show_list': return r.items.length ? `Your ${r.list} list:\n\n${r.items.map((i) => '- ' + i).join('\n')}` : `Your ${r.list} list is empty.${r.lists?.length > 1 ? ` Your lists: ${r.lists.join(', ')}.` : ''}`;
     case 'remove_from_list': return r.removed.length ? `Ticked off ${listWords(r.removed)}. ${r.count} left on your ${r.list} list.` : `I couldn’t find that on your ${r.list} list.`;
     case 'clear_list': return `Your ${r.list} list is empty now.`;
-    case 'save_contact': return `Saved ${r.name}: ${r.number}. You can now say “text ${r.name} …” or “call ${r.name}”.`;
+    case 'save_contact': if (r.app && !r.number) return `Saved ${r.name}’s ${r.app}. Now say “call ${r.name} on ${r.app}” or “message ${r.name} on ${r.app}: …”.`;
+      return `Saved ${r.name}: ${r.number}. You can now say “text ${r.name} …” or “call ${r.name}”.`;
     case 'get_weather': return weatherSummary(r);
     case 'start_workout': return `Opening the workout coach for ${r.exercise.toLowerCase()}. Prop your phone up so your whole body is in view, and I’ll count every rep.`;
     case 'log_workout': return `Logged **${r.logged}**. That’s ${r.week} workout${r.week === 1 ? '' : 's'} this week${r.streak > 1 ? `, and a ${r.streak}-day streak 🔥` : ''}.`;
     case 'workout_summary': return workoutSummaryText(r);
     case 'convert_units': return r.text + '.';
+    case 'go_home': return `${r.app} is open with directions home (${r.mode}).${r.mode === 'driving' ? ' Drive safe!' : ''} 🏠`;
+    case 'set_home_address': return `Saved your home address. It stays on this device. Say “take me home” any time.`;
+    case 'morning_briefing': return r.md;
     case 'set_home_city': return `Got it — your home city is ${r.name}. Ask “what’s the weather?” any time.`;
     default: return 'Done.';
   }

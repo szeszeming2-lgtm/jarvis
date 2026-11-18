@@ -13,6 +13,7 @@ import { bus, uid, tokens, truncate } from './util.js';
 import { parseWhen } from './when.js';
 
 const imageData = new WeakMap(); // message -> base64 images (kept in memory only, not saved)
+const tightData = new WeakMap(); // message -> just the circled part, for the small on-device picture AI
 export const run = { busy: false, cancel: null, confirmResolvers: new Set(), lastViaVoice: false, stopped: false };
 let confirmUI = async () => 'deny';
 export const setConfirmUI = (fn) => { confirmUI = fn; };
@@ -69,7 +70,7 @@ export async function send(text, { viaVoice = false, attachment = null, images =
   const intent = !attachment && !images?.length && settings.instantCommands ? intents.match(text, { customSkills: skills.all().filter((k) => k.enabled !== false) }) : null;
   if (intent?.local === 'stop') { stop(); return; }
   if (intent?.local === 'newchat') { sessions.create(); return; }
-  if (intent?.local === 'look') { bus.emit('look.start', { question: text, viaVoice }); return; }
+  if (intent?.local === 'look') { bus.emit('look.start', { question: text, viaVoice, source: intent.source }); return; }
   if (intent?.local === 'recommend') {
     const { recommend } = await import('./plugins.js');
     push({ role: 'user', content: text, voice: viaVoice || undefined });
@@ -79,6 +80,13 @@ export async function send(text, { viaVoice = false, attachment = null, images =
       : 'You’re already using everything I can do. You can turn plugins on or off in Settings → Plugins.';
     push({ role: 'assistant', content: reply, instant: true, buttons: [...recs.map((r) => ({ label: `${r.action === 'setup' ? 'Set up' : r.action === 'enable' ? 'Add' : 'Try'} ${r.plugin.name}`, plugin: r.plugin.id, action: r.action })), { label: 'All plugins', open: 'plugins' }] });
     if (speakOn) voiceMod.speak(reply);
+    return;
+  }
+  if (intent?.local === 'open') {
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    push({ role: 'assistant', content: intent.say || 'Here it is.', instant: true });
+    if (speakOn) voiceMod.speak(intent.say || '');
+    import('./ui/sheets.js').then((m) => m.openSheet(intent.tab));
     return;
   }
   if (intent?.local === 'share') {
@@ -106,6 +114,7 @@ export async function send(text, { viaVoice = false, attachment = null, images =
   if (images?.length) {
     userMsg.images = images.map((im) => im.thumb).filter(Boolean);
     imageData.set(userMsg, images.map((im) => im.data));
+    tightData.set(userMsg, images.map((im) => im.tight || im.data));
     if (context) userMsg.prompt = `${text}\n\n${context}`;
     update(userMsg);
   }
@@ -115,6 +124,7 @@ export async function send(text, { viaVoice = false, attachment = null, images =
     if (intent?.skill) {
       const sk = intent.skill;
       if (sk.kind === 'routine') { await runRoutine(sk, speakOn); return; }
+      if (sk.kind === 'link') { await runLink(sk, intent.input, speakOn); return; }
       userMsg.prompt = skills.fill(sk.prompt, intent.input, { userName: settings.userName, fallbackInput: '' });
       userMsg.skill = sk.name;
       update(userMsg);
@@ -156,6 +166,25 @@ function attachExtras(msg, name, res) {
   if (res.ok && tool?.reveal) msg.reveal = tool.reveal(res);
   if (res.ok && name === 'find_files' && res.files?.length) msg.files = res.files.slice(0, 12);
   if (res.ok && name === 'set_reminder') msg.reminderId = res.id;
+}
+
+/** Website-shortcut plugin: open its page for the text the user gave. */
+async function runLink(sk, input, speakOn) {
+  if (/\{input\}/.test(sk.url) && !String(input || '').trim()) {
+    const reply = `What should I look up with ${sk.name}? Say “${sk.triggers?.[0] || '/' + sk.command} …” with what you want.`;
+    push({ role: 'assistant', content: reply, instant: true });
+    if (speakOn) voiceMod.speak(reply);
+    return;
+  }
+  let url;
+  try { url = skills.linkFor(sk, input); } catch (e) { push({ role: 'assistant', content: e.message, instant: true }); return; }
+  const t = push({ role: 'tool', tool_name: 'open_website', instant: true, display: 'Working…', running: true, args: { url } });
+  const res = await tools.execute('open_website', { url }, { confirm, source: 'skill' });
+  Object.assign(t, { running: false, ok: res.ok, declined: res.declined, display: tools.summary('open_website', res, { url }) });
+  update(t);
+  const reply = res.ok ? `${sk.name}: opened${input ? ` for “${String(input).trim()}”` : ''}.` : res.error || 'That didn’t open.';
+  push({ role: 'assistant', content: reply, instant: true });
+  if (speakOn) voiceMod.speak(reply);
 }
 
 async function runRoutine(sk, speakOn) {
@@ -245,6 +274,13 @@ function historyFor(s, budget, lastUser = null) {
 
 // ------------------------------------------------------------------ the loop
 async function converse(s, speakOn) {
+  // Pictures: use Ollama's vision model when there is one, otherwise the small on-device picture AI.
+  const lastUser = [...s.messages].reverse().find((m) => m.role === 'user');
+  if (imageData.has(lastUser)) {
+    if (!ollama.isPhone() && ollama.engine.status !== 'online') await ollama.detect();
+    const ollamaSees = !ollama.isPhone() && ollama.engine.status === 'online' && !!ollama.visionModel();
+    if (!ollamaSees) return pictureAnswer(lastUser, speakOn);
+  }
   if (ollama.engine.status !== 'online') await ollama.detect();
   if (ollama.engine.status !== 'online') {
     const st = ollama.engine.status;
@@ -477,6 +513,7 @@ async function runSkillTool(args) {
   const sk = skills.find(args.name);
   if (!sk || sk.enabled === false) return { ok: false, error: `No skill called ${args.name}.` };
   if (sk.kind === 'prompt') return { ok: true, skill: sk.name, instructions: skills.fill(sk.prompt, args.input, { userName: settings.userName }) };
+  if (sk.kind === 'link') { try { const url = skills.linkFor(sk, args.input); const res = await tools.execute('open_website', { url }, { confirm, source: 'skill' }); return { ok: res.ok, skill: sk.name, opened: res.ok ? url : '', error: res.error }; } catch (e) { return { ok: false, error: e.message }; } }
   const results = [];
   for (const step of sk.steps || []) {
     const res = await tools.execute(step.tool, step.args, { confirm, preApproved: !!sk.trusted, source: 'skill' });
@@ -512,6 +549,53 @@ export function say(userText, reply, { viaVoice = false, images = [] } = {}) {
   push({ role: 'user', content: userText, voice: viaVoice || undefined, images: images.length ? images : undefined });
   push({ role: 'assistant', content: reply, instant: true });
   if (speakThisTurn(viaVoice)) voiceMod.speak(reply);
+}
+
+/** Answer a picture question with the on-device picture AI (asks before the one-time download). */
+async function pictureAnswer(userMsg, speakOn, { consented = false } = {}) {
+  const vision = await import('./vision.js');
+  if (!consented && !vision.downloaded() && !vision.ready()) {
+    push({ role: 'assistant', content: '', errorKind: 'pictureai', forMsg: userMsg.id,
+      error: `To answer about pictures${ollama.isPhone() ? ' on your phone' : ' without a big AI model'}, I need the free picture AI (about ${vision.SIZE_MB} MB, downloaded once, best on Wi-Fi). It runs on this device, so your pictures stay private.` });
+    return;
+  }
+  const msg = push({ role: 'assistant', content: '', model: vision.NAME, pending: true });
+  bus.emit('state', 'thinking');
+  const ac = new AbortController();
+  run.cancel = () => ac.abort();
+  try {
+    await vision.load((p) => { msg.loading = `${p.text}${p.progress < 1 ? ` · ${Math.round(p.progress * 100)}%` : ''}`; bus.emit('msg.stream', msg); });
+    msg.loading = 'Looking…'; bus.emit('msg.stream', msg);
+    const t0 = performance.now();
+    const text = await vision.ask(tightData.get(userMsg)?.[0], userMsg.content, {
+      signal: ac.signal,
+      onToken: (d) => { if (msg.pending) { msg.pending = false; msg.loading = ''; bus.emit('state', 'streaming'); } msg.content += d; msg.streaming = true; bus.emit('msg.stream', msg); },
+    });
+    msg.content = text || msg.content.trim() || 'I couldn’t make out what that is. Try circling it a little bigger, or take the photo closer.';
+    msg.stats = { secs: Math.round((performance.now() - t0) / 100) / 10 };
+  } catch (e) {
+    if (!ac.signal.aborted) { msg.error = e.message; msg.errorKind = 'pictureai-failed'; }
+  } finally {
+    Object.assign(msg, { pending: false, streaming: false, loading: '' });
+    update(msg);
+    run.cancel = null;
+  }
+  if (speakOn && msg.content) voiceMod.speak(msg.content);
+}
+
+/** The "Download picture AI" button: download, then answer the waiting picture question. */
+export async function answerPicture(userMsgId) {
+  const s = sessions.state.current;
+  const userMsg = s?.messages.find((m) => m.id === userMsgId);
+  if (!userMsg || !imageData.has(userMsg)) { const { toast } = await import('./ui/common.js'); toast('That picture is no longer in memory. Circle it again and ask.', { bad: true }); return; }
+  setBusy(true);
+  try { await pictureAnswer(userMsg, speakThisTurn(false), { consented: true }); } finally { setBusy(false); bus.emit('turn.done', {}); }
+}
+
+/** JARVIS speaks up on its own (the morning briefing): a message in the chat, spoken if asked. */
+export function announce(reply, { speak = false, buttons } = {}) {
+  push({ role: 'assistant', content: reply, instant: true, buttons });
+  if (speak) voiceMod.speak(reply);
 }
 
 /** Undo an organize action from its chip. */

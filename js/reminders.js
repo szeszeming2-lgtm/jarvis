@@ -39,8 +39,12 @@ function fire(r, missed = false) {
   bus.emit('reminder.due', { ...r, missed });
   const title = `${settings.assistantName} reminder`;
   call('app.notify', { title, body: r.text, sound: true }).catch(() => browserNotify(title, r.text));
-  if (r.textMe && can('messages')) call('messages.send', { to: 'me', text: `Reminder: ${r.text}` }).catch(() => {});
-  if (r.callMe && can('messages')) import('./tools.js').then(({ callText }) => call('messages.send', { to: 'me', text: callText(r.text) })).catch(() => {});
+  // Text you (Mac app, once your number is saved): asked for this one, or on for all reminders.
+  // A reminder that came due hours ago while JARVIS was closed isn't texted late.
+  const late = missed && Date.now() - r.due > 2 * 3600000;
+  const textMe = r.textMe || (!r.callMe && settings.reminders?.textMe !== false && !!settings.profile?.phone);
+  if (textMe && !late && can('messages')) call('messages.send', { to: 'me', text: `⏰ Reminder from ${settings.assistantName || 'JARVIS'}: ${r.text}` }).catch(() => {});
+  if (r.callMe && !late && can('messages')) import('./tools.js').then(({ callText }) => call('messages.send', { to: 'me', text: callText(r.text) })).catch(() => {});
 }
 
 function browserNotify(title, body) {

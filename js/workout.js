@@ -10,7 +10,8 @@ export const all = () => log;
 const NAMES = {
   pushup: 'push-ups', pushups: 'push-ups', 'push ups': 'push-ups', 'push-up': 'push-ups', 'press ups': 'push-ups', 'press-ups': 'push-ups',
   squat: 'squats', 'jumping jack': 'jumping jacks', jacks: 'jumping jacks', curl: 'bicep curls', curls: 'bicep curls', 'bicep curl': 'bicep curls',
-  situp: 'sit-ups', 'sit up': 'sit-ups', 'sit ups': 'sit-ups', 'sit-up': 'sit-ups', lunge: 'lunges', burpee: 'burpees', pullup: 'pull-ups', 'pull up': 'pull-ups', 'pull ups': 'pull-ups',
+  situp: 'sit-ups', 'sit up': 'sit-ups', 'sit ups': 'sit-ups', 'sit-up': 'sit-ups', 'sit-ups & crunches': 'sit-ups', crunch: 'sit-ups', crunche: 'sit-ups', lunge: 'lunges', burpee: 'burpees', pullup: 'pull-ups', 'pull up': 'pull-ups', 'pull ups': 'pull-ups', 'pull-up': 'pull-ups', 'chin up': 'pull-ups',
+  'shoulder pres': 'shoulder press', 'overhead pres': 'shoulder press', 'lateral raise': 'lateral raises', 'high knee': 'high knees', 'glute bridge': 'glute bridges', bridge: 'glute bridges', 'wall sit': 'wall sit',
   run: 'running', ran: 'running', jog: 'running', walk: 'walking', walked: 'walking', bike: 'cycling', cycle: 'cycling', swim: 'swimming', swam: 'swimming',
 };
 export function normExercise(n) {

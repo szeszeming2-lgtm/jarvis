@@ -70,9 +70,10 @@ export const DEFAULTS = {
   },
   memory: { enabled: true, allowSave: true },
   skills: { disabledGroups: [] },
-  profile: { phone: '' },
+  profile: { phone: '', home: '', travel: 'd', maps: 'auto' },   // home address: only on this device, for "take me home"
   weather: { place: '', lat: null, lon: null, units: 'auto' },          // only stored on this device; used for "text me"
-  reminders: { system: true },      // desktop app: also add to the Reminders app
+  reminders: { system: true, textMe: true },      // desktop app: also add to the Reminders app; text you when one is due
+  briefing: { on: true, time: '07:30', text: true, speak: true, last: '' },
   permissions: {
     apps: 'allow', web: 'allow', findFiles: 'allow', readFiles: 'ask', writeFiles: 'ask',
     organize: 'ask', system: 'ask', shortcuts: 'ask', commands: 'off', quitApps: 'ask',

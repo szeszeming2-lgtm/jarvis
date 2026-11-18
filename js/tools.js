@@ -12,6 +12,7 @@ import * as workout from './workout.js';
 import { convert } from './converter.js';
 import { EXERCISES } from './reps.js';
 import { describeWhen } from './when.js';
+import { APPS, normApp, link as appLink, explain as explainApp } from './messaging.js';
 import { bus, truncate } from './util.js';
 
 export const CATEGORIES = {
@@ -110,7 +111,7 @@ export const TOOLS = [
     ...s('Convert between units (length, weight, cooking volumes, temperature, speed, time, data, area).', { value: { type: 'number' }, from: { type: 'string' }, to: { type: 'string' } }, ['value', 'from', 'to']),
     run: async (a) => convert(a.value, a.from, a.to), done: (r) => r.text.replace(/\*/g, '') },
   { name: 'start_workout', icon: 'zap', group: 'fitness',
-    ...s('Open the workout coach: the camera counts reps. Exercises: squats, pushups, jacks (jumping jacks), curls, plank.', { exercise: { type: 'string', enum: Object.keys(EXERCISES) } }),
+    ...s('Open the workout coach: the camera counts reps. Exercises: squats, pushups, jacks (jumping jacks), curls, lunges, situps (sit-ups/crunches), press (shoulder press), raises (lateral raises), knees (high knees), bridges (glute bridges), burpees, pullups, plank and wallsit (timed holds).', { exercise: { type: 'string', enum: Object.keys(EXERCISES) } }),
     run: async (a) => { bus.emit('workout.open', { exercise: a.exercise || 'squats' }); return { exercise: EXERCISES[a.exercise]?.label || 'Squats' }; }, done: (r) => `Coach: ${r.exercise}` },
   { name: 'log_workout', icon: 'zap', group: 'fitness',
     ...s('Log a workout the user did (reps, sets, weight, minutes or distance).', { exercise: { type: 'string' }, reps: { type: 'number' }, sets: { type: 'number' }, weight: { type: 'number' }, unit: { type: 'string', enum: ['kg', 'lb'] }, minutes: { type: 'number' }, km: { type: 'number' } }, ['exercise']),
@@ -160,7 +161,8 @@ export const TOOLS = [
       if (a.call_me && !settings.profile?.phone?.trim()) throw new Error('Tell me your number first, so I know where to call: say “my number is +1 555 123 4567”.');
       const r = await reminders.add(a.text, a.when, { textMe: !!a.text_me, callMe: !!a.call_me });
       const callNote = a.call_me && !can('messages') ? 'Calls come from the JARVIS Mac app, so keep it running on your Mac. The reminder is here as well.' : '';
-      return { id: r.id, text: r.text, when: r.human, due: new Date(r.due).toISOString(), inSystemReminders: !!r.systemId, callNote };
+      const texts = can('messages') && !a.call_me && !!(a.text_me || (settings.reminders?.textMe !== false && settings.profile?.phone));
+      return { id: r.id, text: r.text, when: r.human, due: new Date(r.due).toISOString(), inSystemReminders: !!r.systemId, callNote, texts };
     },
     done: (r) => `Reminder ${r.when}` },
   { name: 'list_reminders', icon: 'bell', group: 'reminders',
@@ -194,19 +196,39 @@ export const TOOLS = [
     },
     done: (r) => `Your number: ${r.number}` },
   { name: 'send_text', category: 'messages', icon: 'message', group: 'contact', alwaysAsk: true, selfOk: (a) => /^(me|myself)$/i.test(String(a.to || '').trim()),
-    ...s('Send a text message. "to" is a phone number, an email for iMessage, a contact name (desktop app), or "me" for the user themself.', {
+    ...s('Send a message. "to" is a phone number, an email for iMessage, a saved person or contact name, or "me" for the user themself. "app" picks the app (default Messages).', {
       to: { type: 'string' }, message: { type: 'string' },
+      app: { type: 'string', enum: ['messages', 'whatsapp', 'telegram', 'discord', 'signal', 'messenger', 'teams', 'skype'] },
     }, ['to', 'message']),
-    prepare: async (a) => resolveRecipient(a.to),
-    ask: (a, who) => ({ title: `${can('messages') ? 'Send' : 'Prepare'} a text to ${who.label}`, detail: can('messages') ? `Sent from your Messages app to ${who.address}.` : 'Your messages app opens with the text ready; you press Send.', preview: a.message }),
-    run: async (a, who) => { const r = await call('messages.send', { to: who.address, text: a.message }); return { to: who.label, sent: !!r?.sent, drafted: !!r?.drafted }; },
-    done: (r) => (r.sent ? `Texted ${r.to}` : `Text ready for ${r.to}`) },
+    prepare: async (a) => {
+      const app = normApp(a.app) || 'messages';
+      if (app === 'messages') return { app, ...(await resolveRecipient(a.to)) };
+      return { app, ...(await resolveForApp(a.to, app, 'text', a.message)) };
+    },
+    ask: (a, who) => who.app === 'messages'
+      ? { title: `${can('messages') ? 'Send' : 'Prepare'} a text to ${who.label}`, detail: can('messages') ? `Sent from your Messages app to ${who.address}.` : 'Your messages app opens with the text ready; you press Send.', preview: a.message }
+      : { title: `Message ${who.label} on ${APPS[who.app].label}`, detail: explainApp(who.app, who.how, 'text'), preview: a.message },
+    run: async (a, who) => {
+      if (who.app !== 'messages') {
+        if (who.how !== 'prefills') await copyText(a.message);
+        await call('app.openLink', { url: who.url });
+        return { to: who.label, app: APPS[who.app].label, how: who.how };
+      }
+      const r = await call('messages.send', { to: who.address, text: a.message });
+      return { to: who.label, sent: !!r?.sent, drafted: !!r?.drafted };
+    },
+    done: (r) => (r.app ? `${r.app}: ${r.to}` : r.sent ? `Texted ${r.to}` : `Text ready for ${r.to}`) },
   { name: 'make_call', category: 'calls', icon: 'phone', group: 'contact', alwaysAsk: true,
-    ...s('Start a phone or FaceTime call. "to" is a phone number, email, or a contact name (desktop app).', { to: { type: 'string' }, facetime: { type: 'boolean' } }, ['to']),
-    prepare: async (a) => resolveRecipient(a.to, { forCall: true }),
-    ask: (a, who) => ({ title: `Call ${who.label}`, detail: `${a.facetime ? 'FaceTime' : 'Phone'} call to ${who.address}. Your ${a.facetime ? 'FaceTime app' : 'phone app'} opens and starts it.` }),
-    run: async (a, who) => { await call('phone.call', { to: who.address, facetime: !!a.facetime }); return { to: who.label }; },
-    done: (r) => `Calling ${r.to}` },
+    ...s('Call someone. "to" is a phone number, email, saved person or contact name. "app": phone (default), facetime, whatsapp, discord, telegram, skype, teams, messenger or signal. "video" for a video call.', {
+      to: { type: 'string' }, app: { type: 'string', enum: Object.keys(APPS).filter((k) => APPS[k].call) }, video: { type: 'boolean' }, facetime: { type: 'boolean' },
+    }, ['to']),
+    prepare: async (a) => {
+      const app = normApp(a.app) || (a.facetime ? 'facetime' : 'phone');
+      return { app, ...(await resolveForApp(a.to, app, a.video ? 'video' : 'call')) };
+    },
+    ask: (a, who) => ({ title: `${a.video ? 'Video call' : 'Call'} ${who.label}${who.app !== 'phone' ? ` on ${APPS[who.app].label}` : ''}`, detail: explainApp(who.app, who.how, a.video ? 'video' : 'call') }),
+    run: async (a, who) => { await call('app.openLink', { url: who.url }); return { to: who.label, app: APPS[who.app].label, how: who.how }; },
+    done: (r) => `${r.how === 'starts' ? 'Calling' : 'Opened chat with'} ${r.to}${r.app !== 'Phone' ? ` (${r.app})` : ''}` },
   { name: 'look_at_screen', category: 'screen', icon: 'eye', group: 'look',
     ...s('Let the user point at something on their screen so you can identify it. Use when they ask "what is this?" about something on screen.', { question: { type: 'string' } }),
     ask: () => ({ title: 'Look at what you point to on your screen', detail: 'You choose the spot. Only that area is looked at, on this computer.' }),
@@ -229,8 +251,12 @@ export const TOOLS = [
     ask: (a) => ({ title: `Empty your ${lists.normName(a.list)} list`, preview: lists.open(a.list).map((i) => '• ' + i.text).join('\n') || 'It’s already empty.' }),
     run: async (a) => lists.clear(a.list), done: (r) => `Emptied ${r.list}` },
   { name: 'save_contact', icon: 'user', group: 'contact',
-    ...s('Save a person\'s phone number (or iMessage email) so the user can text or call them by name.', { name: { type: 'string' }, number: { type: 'string' } }, ['name', 'number']),
-    run: async (a) => { const p = people.upsert({ name: a.name, phone: a.number }); return { name: p.name, number: p.phone }; },
+    ...s('Save a person\'s phone number, or their username in an app (discord DM link, telegram, skype, teams email, messenger, whatsapp number).', { name: { type: 'string' }, number: { type: 'string' }, app: { type: 'string', enum: ['discord', 'telegram', 'skype', 'teams', 'messenger', 'whatsapp'] }, handle: { type: 'string' } }, ['name']),
+    run: async (a) => {
+      const app = normApp(a.app);
+      const p = people.upsert({ name: a.name, phone: a.number || '', ...(app && a.handle ? { [app]: a.handle } : {}) });
+      return { name: p.name, number: a.number ? p.phone : '', app: app ? APPS[app].label : '', handle: app ? p[app] : '' };
+    },
     done: (r) => `Saved ${r.name}` },
   { name: 'get_weather', category: 'web', icon: 'sun', group: 'weather',
     ...s('Get the current weather and the forecast for today and tomorrow. Leave place empty for the user\'s home city.', { place: { type: 'string' } }),
@@ -238,6 +264,29 @@ export const TOOLS = [
   { name: 'set_home_city', icon: 'home', group: 'weather',
     ...s('Remember the user\'s home city for weather.', { place: { type: 'string' } }, ['place']),
     run: async (a) => weather.setHome(a.place), done: (r) => `Home city: ${r.name}` },
+  { name: 'go_home', icon: 'home', group: 'home',
+    ...s('Directions home from where the user is now (opens Maps). "mode": drive, walk, transit or cycle.', { mode: { type: 'string', enum: ['drive', 'walk', 'transit', 'cycle'] } }),
+    run: async (a) => {
+      const home = String(settings.profile?.home || '').trim();
+      if (!home) throw new Error('Where is home? Say “my home address is 12 Main Street, Toronto” once. It stays on this device.');
+      const l = homeLink(home, a.mode);
+      await call('app.openLink', { url: l.url });
+      return { mode: l.mode, app: l.app };
+    },
+    done: (r) => `Directions home (${r.mode})` },
+  { name: 'set_home_address', icon: 'home', group: 'home',
+    ...s('Save the user\'s home address for "take me home". Only stored on this device.', { address: { type: 'string' } }, ['address']),
+    run: async (a) => {
+      const addr = String(a.address || '').trim().replace(/[.]+$/, '');
+      if (addr.length < 4) throw new Error('That address looks too short.');
+      set('profile.home', addr);
+      return { address: addr };
+    },
+    done: () => 'Home address saved' },
+  { name: 'morning_briefing', icon: 'coffee', group: 'briefing',
+    ...s('The user\'s briefing for today: weather, calendar, reminders and to-do list. Use for "good morning", "what\'s my day", "what do I need to do today".', {}),
+    run: async () => { const b = await import('./briefing.js'); if (new Date().getHours() < 14) set('briefing.last', b.todayKey()); return b.build(); },
+    done: () => 'Briefing ready' },
   { name: 'remember', category: 'memory', icon: 'brain', group: 'memory',
     ...s('Save a short fact about the user to long-term memory, only when they ask you to remember something or share a lasting preference.', { fact: { type: 'string' } }, ['fact']),
     run: async (a) => { const m = await memory.add(a.fact, 'jarvis'); return { saved: m.text }; }, done: (r) => `Remembered: ${truncate(r.saved, 46)}` },
@@ -272,6 +321,8 @@ export const GROUPS = {
   fitness: { label: 'Workout coach and log', icon: 'zap' },
   convert: { label: 'Unit converter', icon: 'calculator' },
   status: { label: 'System report', icon: 'cpu' },
+  home: { label: 'Take me home (directions)', icon: 'home' },
+  briefing: { label: 'Morning briefing', icon: 'coffee' },
 };
 
 export function available(tool) {
@@ -417,9 +468,45 @@ function appStats() {
 
 // ---------------------------------------------------------------- calls to you
 const CALL_URL = 'https://szeszeming2-lgtm.github.io/jarvis/';
+/** Maps link for directions home: Apple Maps on Apple devices, Google Maps elsewhere. */
+export function homeLink(home, mode = settings.profile?.travel) {
+  const m = { drive: 'd', driving: 'd', car: 'd', d: 'd', walk: 'w', walking: 'w', w: 'w', transit: 'r', bus: 'r', train: 'r', r: 'r', cycle: 'c', bike: 'c', cycling: 'c', c: 'c' }[String(mode || 'd').toLowerCase()] || 'd';
+  const word = { d: 'driving', w: 'walking', r: 'transit', c: 'cycling' }[m];
+  const pref = settings.profile?.maps || 'auto';
+  const apple = pref === 'apple' || (pref === 'auto' && /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent));
+  const enc = encodeURIComponent(home);
+  if (apple && m !== 'c') return { app: 'Apple Maps', mode: word, url: `${isNative ? 'maps://' : 'https://maps.apple.com/'}?daddr=${enc}&dirflg=${m}` };
+  return { app: 'Google Maps', mode: word, url: `https://www.google.com/maps/dir/?api=1&destination=${enc}&travelmode=${{ d: 'driving', w: 'walking', r: 'transit', c: 'bicycling' }[m]}` };
+}
+
 /** The text that rings your phone: tapping the link opens JARVIS's incoming-call screen. */
 export function callText(message) {
   const name = settings.assistantName || 'JARVIS';
   const link = `${CALL_URL}#call=${encodeURIComponent(String(message || '').slice(0, 300))}&from=${encodeURIComponent(name)}`;
   return `📞 ${name} is calling you${message ? ` about: ${message}` : ''}. Tap to answer: ${link}`;
+}
+
+// ---------------------------------------------------------------- other apps
+/** Who + how for a call or message in another app. */
+async function resolveForApp(to, app, kind, message = '') {
+  const raw = String(to || '').trim().replace(/^my /i, '');
+  let person = null;
+  if (/^(me|myself)$/i.test(raw)) {
+    if (!settings.profile?.phone) throw new Error('Tell me your number first: say “my number is +1 555 123 4567”.');
+    person = { name: 'you', phone: settings.profile.phone };
+  } else if (/^\+?[\d\s().-]{5,20}$/.test(raw) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) person = { name: raw, phone: raw };
+  else person = people.find(raw);
+  if (!person && can('contacts')) {
+    const found = await call('contacts.find', { name: raw });
+    const c = found?.matches?.[0];
+    if (c) person = { name: c.name, phone: c.phones?.[0] || c.emails?.[0] || '' };
+  }
+  if (!person) throw new Error(`I don’t have ${raw} saved yet. Say “save ${raw}’s number as +1 555 123 4567”${app !== 'phone' && app !== 'messages' ? ` or “save ${raw}’s ${app} as …”` : ''}, or add them under Lists & People.`);
+  const l = appLink(app, person, kind, message);
+  return { label: person.name, url: l.url, how: l.how };
+}
+
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return; } catch {}
+  try { await call('app.copy', { text: t }); } catch {}
 }
