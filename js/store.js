@@ -48,6 +48,7 @@ export const DEFAULTS = {
     contextLength: 'auto',     // auto | 2048 | 4096 | 8192 | 16384 | 32768
     keepAlive: '5m',           // 0 | 5m | 30m | -1
     thinking: false,           // show model reasoning when supported
+    visionModel: '',           // '' = pick an installed model that can see images
     tools: true,               // let the model use abilities
     maxHistory: 30,
   },
@@ -67,16 +68,19 @@ export const DEFAULTS = {
   },
   memory: { enabled: true, allowSave: true },
   skills: { disabledGroups: [] },
+  profile: { phone: '' },          // only stored on this device; used for "text me"
+  reminders: { system: true },      // desktop app: also add to the Reminders app
   permissions: {
     apps: 'allow', web: 'allow', findFiles: 'allow', readFiles: 'ask', writeFiles: 'ask',
     organize: 'ask', system: 'ask', shortcuts: 'ask', commands: 'off', quitApps: 'ask',
+    reminders: 'allow', messages: 'ask', calls: 'ask', screen: 'ask',
   },
   appearance: {
     theme: 'reactor', accent: '', visualizer: 'reactor', motion: 'full', glass: 'full', fontScale: 1,
   },
   home: {
     sidebar: true, hud: true, suggestions: true,
-    hudCards: { clock: true, system: true, ai: true, voice: true, quick: true },
+    hudCards: { clock: true, reminders: true, system: true, ai: true, voice: true, quick: true },
     quick: [
       { label: 'System report', icon: 'cpu', text: 'Give me a system status report' },
       { label: 'Open Safari', icon: 'globe', text: 'open Safari' },
@@ -86,8 +90,8 @@ export const DEFAULTS = {
   },
   shortcuts: {
     newChat: 'Mod+N', search: 'Mod+K', settings: 'Mod+,', toggleSidebar: 'Mod+\\',
-    toggleHud: 'Mod+I', listen: 'Mod+Shift+L', stop: 'Escape', focusInput: 'Mod+L',
-    globalSummon: 'Alt+Mod+J',
+    toggleHud: 'Mod+I', listen: 'Mod+Shift+L', stop: 'Escape', focusInput: 'Mod+L', look: 'Mod+Shift+I',
+    globalSummon: 'Alt+Mod+J', globalLook: 'Alt+Mod+I',
   },
 };
 

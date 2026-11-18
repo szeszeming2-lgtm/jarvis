@@ -16,7 +16,11 @@ Speed depends on your computer. Smaller models answer faster; bigger ones are sm
 
 Chat with streaming replies, conversation history, memory you control, custom instructions, skills, instant commands (maths, timers, time), web searches, spoken replies, themes and keyboard shortcuts. It also works offline once loaded.
 
-Opening apps, files, system settings, offline voice input and the wake word need the JARVIS desktop app (in progress).
+- **Reminders:** "remind me at 5pm to call the bank". JARVIS speaks and shows the reminder when it's due (while open). **Add to Calendar** saves it to your phone or computer calendar so you're reminded even when JARVIS is closed.
+- **Texts and calls:** "text +1 555 0100 saying I'm on my way" or "call +44 20 7946 0000". Your messages or phone app opens with everything filled in; you press Send or Call.
+- **What's this?** Click the eye button, share your screen, then click anything to have it identified. You can also paste or drop a screenshot. This needs a free vision model (for example `qwen2.5vl:3b` or `moondream`).
+
+Opening apps, files, system settings, sending texts automatically, looking up contacts, clicking anywhere on screen to identify it, offline voice input and the wake word need the JARVIS desktop app (in progress).
 
 ## Privacy
 

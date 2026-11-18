@@ -6,6 +6,8 @@ import * as ollama from './ollama.js';
 import * as sessions from './sessions.js';
 import * as memory from './memory.js';
 import * as skills from './skills.js';
+import * as reminders from './reminders.js';
+import * as look from './ui/look.js';
 import * as assistant from './assistant.js';
 import * as voice from './voice.js';
 import { Visualizer } from './visualizer.js';
@@ -30,7 +32,7 @@ async function boot() {
   await loadSettings();
   applyAppearance();
   hydrateIcons();
-  await Promise.all([memory.load(), skills.load(), sessions.load()]);
+  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load()]);
   sessions.create();
 
   app.viz = new Visualizer($('#visualizer'));
@@ -49,6 +51,13 @@ async function boot() {
   bus.on('session', (s) => { $('#sessionTitle').value = s.title; renderWelcome(); });
   bus.on('session.title', (s) => { if (s === sessions.state.current) $('#sessionTitle').value = s.title; });
   bus.on('wizard.open', openWizard);
+  bus.on('look.start', (d) => look.start(d));
+  bus.on('reminder.due', (r) => {
+    const text = r.missed ? `While I was closed, a reminder came due: ${r.text}.` : `Reminder: ${r.text}.`;
+    toast(text, { icon: 'bell', ms: 15000 });
+    if (settings.voice.speak !== 'never') { voice.stopSpeaking(); voice.speak(text); }
+    app.viz.kick(1.2);
+  });
   bus.on('wizard.closed', () => { renderWelcome(); syncWake(); $('#input').focus(); });
   bus.on('timer.done', (d) => { const text = `Your ${d.label ? d.label + ' ' : ''}timer is done.`; toast(text, { icon: 'clock', ms: 8000 }); if (settings.voice.speak !== 'never') voice.speak(text); app.viz.kick(1); });
   $('#brandName').textContent = settings.assistantName.toUpperCase();
@@ -171,6 +180,25 @@ function wireComposer() {
   });
   send.addEventListener('click', () => (assistant.run.busy || voice.voice.speaking ? stopAll() : submit()));
   $('#attachBtn').addEventListener('click', attach);
+  $('#lookBtn').addEventListener('click', () => look.start({ question: input.value.trim() }));
+  // Pictures: paste (⌘V a screenshot), drag and drop, or the paperclip.
+  input.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.items || [])].filter((i) => i.type.startsWith('image/')).map((i) => i.getAsFile()).filter(Boolean);
+    if (files.length) { e.preventDefault(); files.forEach(addPendingImage); }
+  });
+  let dragDepth = 0, hint = null;
+  const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  document.addEventListener('dragenter', (e) => { if (!isFileDrag(e)) return; e.preventDefault(); if (dragDepth++ === 0) { hint = h('div', { class: 'drop-hint', text: 'DROP A PICTURE OR DOCUMENT' }); document.body.append(hint); } });
+  document.addEventListener('dragover', (e) => { if (isFileDrag(e)) e.preventDefault(); });
+  document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; hint?.remove(); } });
+  document.addEventListener('drop', async (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); dragDepth = 0; hint?.remove();
+    for (const f of e.dataTransfer.files) {
+      if (f.type.startsWith('image/')) addPendingImage(f);
+      else if (f.size < 5e6) assistant.send(input.value.trim() || `Summarize “${f.name}” in a few key points.`, { attachment: { name: f.name, path: f.name, text: (await f.text()).slice(0, 24000) } });
+    }
+  });
   bus.on('busy', (on) => {
     send.classList.toggle('stop', on);
     send.replaceChildren(iconNode(on ? 'stop' : 'send'));
@@ -182,11 +210,14 @@ function wireComposer() {
   bus.on('msg.stream', () => app.viz.kick(0.05));
   function submit() {
     const text = input.value.trim();
-    if (!text) return;
+    const images = pending.splice(0);
+    drawPending();
+    if (!text && !images.length) return;
     input.value = '';
     grow();
     $('#slashMenu').hidden = true;
-    assistant.send(text);
+    if (images.length) assistant.send(text || 'What is in this picture?', { images });
+    else assistant.send(text);
   }
 }
 
@@ -196,10 +227,28 @@ function stopAll() {
   if (voice.voice.listening && voice.voice.mode !== 'wake') voice.stopListening();
 }
 
+const pending = [];
+function drawPending() {
+  const box = $('#pending');
+  box.hidden = !pending.length;
+  box.replaceChildren(...pending.map((p, i) => h('div', { class: 'pend', title: 'Will be sent with your next message' }, h('img', { src: p.thumb, alt: 'Picture to send' }),
+    h('button', { type: 'button', 'aria-label': 'Remove picture', onclick: () => { pending.splice(i, 1); drawPending(); } }, iconNode('x')))));
+  $('#sendBtn').classList.toggle('ready', !!pending.length || !!$('#input').value.trim());
+}
+async function addPendingImage(file) {
+  try {
+    if (pending.length >= 3) return toast('Up to 3 pictures at a time.', { bad: true });
+    pending.push(await look.prepareImage(file));
+    drawPending();
+    $('#input').focus();
+  } catch (e) { toast(e.message, { bad: true }); }
+}
+
 async function attach() {
   try {
-    const f = await call('file.pickDocument', {}).catch(async (e) => { if (/desktop app/.test(e.message)) return call('file.open', { accept: '.txt,.md,.csv,.json,.html,.js,.py' }); throw e; });
+    const f = await call('file.pickDocument', {}).catch(async (e) => { if (/desktop app/.test(e.message)) return call('file.open', { accept: '.txt,.md,.csv,.json,.html,.js,.py,image/*' }); throw e; });
     if (!f) return;
+    if (f.imageDataUrl || f.image) { pending.push(f.image ? { data: f.image, thumb: f.thumb } : await look.prepareImage(f.imageDataUrl)); drawPending(); return; }
     let doc = f;
     if (!f.text && f.path) doc = await call('tool.read_document', { path: f.path });
     const text = (doc.text || '').slice(0, 24000);
@@ -310,7 +359,7 @@ async function syncWake() {
 
 // ------------------------------------------------------------------ shortcuts
 function wireShortcuts() {
-  const sendHotkeys = () => call('app.setHotkeys', { summon: settings.shortcuts.globalSummon }).catch(() => {});
+  const sendHotkeys = () => call('app.setHotkeys', { summon: settings.shortcuts.globalSummon, look: settings.shortcuts.globalLook }).catch(() => {});
   sendHotkeys();
   bus.on('shortcuts', sendHotkeys);
   document.addEventListener('keydown', (e) => {
@@ -324,7 +373,7 @@ function wireShortcuts() {
       return;
     }
     if (!$('#wizardLayer').hidden) return;
-    const act = { newChat, search: () => { if (!settings.home.sidebar) { set('home.sidebar', true); applyLayout(); } $('#searchInput').focus(); }, settings: () => (sheetOpen() ? closeSheet() : openSheet('general')), focusInput: () => $('#input').focus(), listen: () => app.toggleListen(), toggleSidebar: () => $('#sidebarToggle').click(), toggleHud: () => $('#hudToggle').click() };
+    const act = { look: () => look.start({}), newChat, search: () => { if (!settings.home.sidebar) { set('home.sidebar', true); applyLayout(); } $('#searchInput').focus(); }, settings: () => (sheetOpen() ? closeSheet() : openSheet('general')), focusInput: () => $('#input').focus(), listen: () => app.toggleListen(), toggleSidebar: () => $('#sidebarToggle').click(), toggleHud: () => $('#hudToggle').click() };
     for (const [k, fn] of Object.entries(act)) {
       if (matches(e, sc[k])) { e.preventDefault(); fn(); return; }
     }
@@ -334,6 +383,7 @@ function wireShortcuts() {
     events.on('command', (d) => {
       const c = d.name;
       if (c === 'summon') { closeSheet(); app.toggleListen?.(); }
+      else if (c === 'look') look.start({});
       else if (c === 'newChat') newChat();
       else if (c === 'settings') openSheet(d.tab || 'general');
       else if (c === 'listen') app.toggleListen?.();

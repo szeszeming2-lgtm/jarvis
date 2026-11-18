@@ -59,7 +59,7 @@ registerTab('models', (body) => {
             loaded ? h('span', { class: 'pill ok', text: 'Loaded in memory' }) : null,
             caps.includes('tools') ? h('span', { class: 'pill', text: 'Abilities' }) : null,
             caps.includes('thinking') ? h('span', { class: 'pill', text: 'Reasoning' }) : null,
-            caps.includes('vision') ? h('span', { class: 'pill', text: 'Vision' }) : null),
+            caps.includes('vision') ? h('span', { class: 'pill', text: 'Sees images' }) : null),
           h('div', { class: 'item-sub', text: [fmtBytes(m.size), m.details?.parameter_size, m.details?.quantization_level, m.details?.family].filter(Boolean).join(' · ') + (m.size > ram * 1e9 * 0.6 ? ' · may be slow on this device' : '') })),
         h('div', { class: 'item-actions' },
           active ? null : h('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Use', onclick: () => { set('ai.model', m.name); bus.emit('engine', ollama.engine); toast(`Now using ${m.name}`); ollama.warm(m.name); } }),
@@ -83,7 +83,7 @@ registerTab('models', (body) => {
         grid.append(h('div', { class: 'item' + (m.name === pick?.name ? ' on' : ''), style: { opacity: m.fits ? 1 : 0.55 } },
           h('span', { class: 'item-ic' }, iconNode(m.tools ? 'zap' : 'sparkles')),
           h('div', { class: 'item-main' },
-            h('div', { class: 'item-title' }, m.label, h('span', { class: 'mono muted', text: m.name }), m.name === pick?.name ? h('span', { class: 'pill accent', text: 'Recommended for you' }) : null, m.tools ? h('span', { class: 'pill', text: 'Abilities' }) : null, !m.fits ? h('span', { class: 'pill warn', text: 'Needs more memory' }) : null),
+            h('div', { class: 'item-title' }, m.label, h('span', { class: 'mono muted', text: m.name }), m.name === pick?.name ? h('span', { class: 'pill accent', text: 'Recommended for you' }) : null, m.tools ? h('span', { class: 'pill', text: 'Abilities' }) : null, m.vision ? h('span', { class: 'pill', text: 'Sees images' }) : null, !m.fits ? h('span', { class: 'pill warn', text: 'Needs more memory' }) : null),
             h('div', { class: 'item-sub', text: `${m.note} About ${m.size} GB download.` }),
             d ? h('div', { class: 'progress' }, h('i', { style: { width: (d.pct || 0) + '%' } })) : null,
             d ? h('div', { class: 'item-sub mono', text: d.status }) : null),
@@ -102,6 +102,7 @@ registerTab('models', (body) => {
     // Advanced
     adv.replaceChildren(section('Performance and behaviour', 'Lower values use less memory, which helps older computers.', rows(
       row('Let the AI use abilities', 'Opening apps, finding files, timers… Needs a model with “Abilities”.', toggle(settings.ai.tools, (v) => set('ai.tools', v), 'Abilities')),
+      row('Model for pictures', 'Used for “What’s this?” and pictures you send. Auto picks one that can see.', select(settings.ai.visionModel, [['', `Auto (${ollama.visionModel() || 'none installed'})`], ...e.models.filter((m) => (m.capabilities || []).includes('vision')).map((m) => [m.name, m.name])], (v) => set('ai.visionModel', v), 'Vision model')),
       row('Show reasoning', 'For “Reasoning” models: think step by step and show it. Slower, sometimes smarter.', toggle(settings.ai.thinking, (v) => set('ai.thinking', v), 'Reasoning')),
       row('Context length', 'How much conversation the model reads each time. Auto picks a safe size for your memory.', select(settings.ai.contextLength, [['auto', `Auto (${ollama.contextLength(ram)})`], ['2048', '2,048 (lightest)'], ['4096', '4,096'], ['8192', '8,192'], ['16384', '16,384'], ['32768', '32,768 (heavy)']], (v) => set('ai.contextLength', v), 'Context length')),
       row('Keep model loaded', 'Keeping it in memory makes the next answer instant.', select(String(settings.ai.keepAlive), [['0', 'Unload right away (saves memory)'], ['5m', '5 minutes'], ['30m', '30 minutes'], ['-1', 'Always']], (v) => set('ai.keepAlive', v), 'Keep alive')),

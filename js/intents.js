@@ -1,6 +1,7 @@
 // Instant commands: common requests handled locally without the AI model,
 // so they are immediate and work even before any model is installed.
 import { looksLikeMath } from './calc.js';
+import { parseWhen, describeWhen } from './when.js';
 
 const WEBSITES = {
   youtube: 'youtube.com', gmail: 'mail.google.com', google: 'google.com', netflix: 'netflix.com', reddit: 'reddit.com',
@@ -32,6 +33,34 @@ export function match(raw, { customSkills = [] } = {}) {
 
   if (/^(stop|cancel|be quiet|quiet|shush|shut up|enough|never ?mind|that'?s enough)$/i.test(low)) return { local: 'stop' };
   if (/^(new (chat|conversation)|start over|clear (the )?chat)$/i.test(low)) return { local: 'newchat' };
+
+  // Reminders: "remind me to X in 10 minutes", "remind me at 5pm to X", "text me tomorrow at 9 to X"
+  const TIME = '(in .+?|at .+?|by .+?|tomorrow(?: (?:at|morning|afternoon|evening|night) ?.*?)?|tonight(?: at .+?)?|this (?:morning|afternoon|evening)(?: at .+?)?|(?:on |next |this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?: at .+?)?|at noon|at midnight)';
+  let r;
+  const remindRe1 = new RegExp(`^(remind|text|message) me (?:a reminder )?${TIME} (?:to|about|that) (.+)$`, 'i');
+  const remindRe2 = new RegExp(`^(remind|text|message) me (?:to|about|that) (.+?) ${TIME}$`, 'i');
+  const remindRe4 = new RegExp(`^(?:don'?t let me forget|make sure i (?:don'?t forget|remember)|help me remember|i need to remember|i have to remember|ping me) (?:to |about |that )?(.+?) ${TIME}$`, 'i');
+  const remindRe5 = new RegExp(`^(?:don'?t let me forget|make sure i (?:don'?t forget|remember)|ping me) ${TIME} (?:to |about |that )?(.+)$`, 'i');
+  const remindRe3 = new RegExp(`^(?:set|add|create) (?:a )?reminder (?:for )?${TIME} (?:to|about|that|:) ?(.+)$`, 'i');
+  if ((r = t.match(remindRe1)) && parseWhen(r[2])) return { tool: 'set_reminder', args: { text: r[3], when: r[2], text_me: r[1].toLowerCase() !== 'remind' } };
+  if ((r = t.match(remindRe2)) && parseWhen(r[3])) return { tool: 'set_reminder', args: { text: r[2], when: r[3], text_me: r[1].toLowerCase() !== 'remind' } };
+  if ((r = t.match(remindRe3)) && parseWhen(r[1])) return { tool: 'set_reminder', args: { text: r[2], when: r[1], text_me: false } };
+  if ((r = t.match(remindRe4)) && parseWhen(r[2])) return { tool: 'set_reminder', args: { text: r[1], when: r[2], text_me: false } };
+  if ((r = t.match(remindRe5)) && parseWhen(r[1])) return { tool: 'set_reminder', args: { text: r[2], when: r[1], text_me: false } };
+  if (/^(what are|show|list|read) (me )?(my )?(upcoming )?reminders$|^(do i have )?any reminders$|^my reminders$/.test(low)) return { tool: 'list_reminders', args: {} };
+  if ((r = low.match(/^(?:cancel|delete|remove|clear) (?:my |the )?reminders? (?:about |to |for )?(.+)$/))) return { tool: 'cancel_reminder', args: { about: r[1] } };
+
+  // "call me Alex" means a name, not a phone call.
+  if ((r = t.match(/^(?:call me|my name is|i'?m called) ([\p{L}][\p{L}'’ -]{0,30})$/iu)) && r[1].split(/\s+/).length <= 3) return { local: 'callme', name: r[1].trim() };
+
+  // Texts: "text Mom saying I'm on my way", "message +1 555 0100: hi", "text me buy milk"
+  if ((r = t.match(/^(?:text|message|imessage|send (?:a )?(?:text|message) to) (.+?)(?:\s*:\s*|\s+saying\s+|\s+that says\s+|\s+that\s+)(.+)$/i))) return { tool: 'send_text', args: { to: r[1].replace(/^my /i, ''), message: r[2] } };
+  if ((r = t.match(/^text me (.+)$/i))) return { tool: 'send_text', args: { to: 'me', message: r[1] } };
+  // Calls: "call Mom", "facetime +44 20 7946 0000"
+  if ((r = t.match(/^(call|phone|ring|dial|facetime)(?: up)? (.+)$/i)) && !/^(me|it|that|this|off|back)\b/i.test(r[2]) && r[2].split(/\s+/).length <= 4) return { tool: 'make_call', args: { to: r[2].replace(/^my /i, ''), facetime: /facetime/i.test(r[1]) } };
+
+  // Identify something on screen
+  if (/^(what('?s| is) (this|that)( on (my |the )?screen)?|identify (this|that|something)( on (my |the )?screen)?|what am i (looking|pointing) at|look at (my |the )?screen|what('?s| is) on (my |the )?screen|explain (this|what i'?m pointing at))$/.test(low)) return { local: 'look' };
 
   // Time and date
   if (/^(what('?s| is) the )?time( is it)?( now)?$|^what time is it( now)?$|^tell me the time$/.test(low)) return { tool: 'get_datetime', args: {}, say: 'time' };
@@ -130,6 +159,11 @@ export function reply(intent, res, name = 'JARVIS') {
       return `I found ${r.count} file${r.count === 1 ? '' : 's'}${r.count > 8 ? ' (showing 8)' : ''}:\n\n${list}`;
     }
     case 'system_status': return statusText(r);
+    case 'set_reminder': return `I’ll remind you ${r.when}${intent.args.text_me ? ' and send you a text' : ''}: **${r.text}**.${r.inSystemReminders ? ' It’s in your Reminders app too, so your phone will remind you as well.' : ''}`;
+    case 'list_reminders': return r.count ? `You have ${r.count} upcoming reminder${r.count === 1 ? '' : 's'}:\n\n${r.reminders.map((x) => `- **${x.text}** — ${x.when}`).join('\n')}` : 'You have no upcoming reminders.';
+    case 'cancel_reminder': return `Cancelled ${r.cancelled} reminder${r.cancelled === 1 ? '' : 's'}.`;
+    case 'send_text': return r.sent ? `Message sent to ${r.to}.` : `Your messages app is open with the text to ${r.to}. Press Send when you’re ready.`;
+    case 'make_call': return `Calling ${r.to}.`;
     default: return 'Done.';
   }
 }

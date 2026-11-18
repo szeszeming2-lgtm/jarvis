@@ -1,12 +1,12 @@
 // Offline support for the web version: the interface is cached so JARVIS opens
 // without internet. Requests to Ollama (another origin) are never touched.
-const VERSION = 'jarvis-7801086cf1';
+const VERSION = 'jarvis-10c8a2832f';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/main.js', 'js/util.js', 'js/icons.js', 'js/host.js', 'js/store.js', 'js/ollama.js', 'js/markdown.js', 'js/calc.js',
   'js/tools.js', 'js/memory.js', 'js/sessions.js', 'js/intents.js', 'js/skills.js', 'js/assistant.js', 'js/voice.js', 'js/visualizer.js',
   'js/ui/common.js', 'js/ui/chat.js', 'js/ui/sheets.js', 'js/ui/settings.js', 'js/ui/theme.js', 'js/ui/models.js', 'js/ui/memory-skills.js',
-  'js/ui/panels.js', 'js/ui/wizard.js', 'js/ui/connect.js',
+  'js/ui/panels.js', 'js/ui/wizard.js', 'js/ui/connect.js', 'js/ui/look.js', 'js/when.js', 'js/reminders.js',
   'assets/icon-192.png', 'assets/icon-512.png', 'assets/icon-maskable-512.png', 'assets/apple-touch-icon.png', 'assets/favicon-32.png',
 ];
 

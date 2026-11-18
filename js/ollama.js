@@ -86,6 +86,14 @@ export function recommendInstalled(ramGB = window.__deviceRam || 8) {
   return (fits.length ? fits[fits.length - 1] : chat[0]);
 }
 
+/** A model that can look at images: the chosen one, the main model if it can see, or any installed vision model. */
+export function visionModel() {
+  const can = (n) => n && (engine.caps.get(n)?.capabilities || []).includes('vision');
+  if (can(settings.ai.visionModel)) return settings.ai.visionModel;
+  if (can(settings.ai.model)) return settings.ai.model;
+  return engine.models.find((m) => (m.capabilities || []).includes('vision'))?.name || '';
+}
+
 export const modelInfo = (name = settings.ai.model) => engine.caps.get(name) || engine.models.find((m) => m.name === name);
 export const hasCap = (cap, name = settings.ai.model) => (modelInfo(name)?.capabilities || []).includes(cap);
 
@@ -101,16 +109,16 @@ export function contextLength(ramGB = window.__deviceRam || 8) {
  * Stream a chat. handlers: onContent(delta), onThinking(delta), onTools(calls), onDone(final)
  * Returns { promise, cancel }.
  */
-export function chat({ messages, tools, think, options = {} }, handlers = {}) {
+export function chat({ model, messages, tools, think, options = {} }, handlers = {}) {
   const body = {
-    model: settings.ai.model,
+    model: model || settings.ai.model,
     messages,
     stream: true,
     keep_alive: keepAliveValue(),
     options: { temperature: Number(settings.ai.temperature), num_ctx: contextLength(), ...options },
   };
   if (tools?.length) body.tools = tools;
-  if (hasCap('thinking')) body.think = !!think;
+  if (hasCap('thinking', body.model)) body.think = !!think;
   engine.lastRequest = { model: body.model, tools: (body.tools || []).map((t) => t.function.name), messages: messages.length, num_ctx: body.options.num_ctx };
   let final = null;
   const toolCalls = [];
@@ -132,6 +140,14 @@ export function chat({ messages, tools, think, options = {} }, handlers = {}) {
     cancel: s.cancel,
     promise: s.promise.then(() => ({ final, toolCalls })),
   };
+}
+
+/** Fill in a JSON form reliably (Ollama structured output). */
+export async function extract({ system, user, schema, model = settings.ai.model }) {
+  const body = { model, stream: false, format: schema, keep_alive: keepAliveValue(), options: { temperature: 0, num_predict: 200 }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+  if (hasCap('thinking', model)) body.think = false;
+  const r = await req('/api/chat', 'POST', body);
+  return JSON.parse(r.message?.content || '{}');
 }
 
 /** One-shot, non-streaming generation for small jobs (titles). */
@@ -179,14 +195,19 @@ export const CATALOG = [
   { name: 'qwen3:1.7b', label: 'Qwen3 1.7B', size: 1.4, ram: 8, tier: 'Light', note: 'Great speed/quality balance. Uses abilities well.', tools: true, pick: true },
   { name: 'llama3.2:3b', label: 'Llama 3.2 3B', size: 2.0, ram: 8, tier: 'Light', note: 'Solid all-rounder for 8 GB computers.', tools: true },
   { name: 'qwen3:4b', label: 'Qwen3 4B', size: 2.6, ram: 8, tier: 'Light', note: 'Smarter, still quick on Apple Silicon.', tools: true },
-  { name: 'gemma3:4b', label: 'Gemma 3 4B', size: 3.3, ram: 8, tier: 'Light', note: 'Strong writing. Can look at images.' },
+  { name: 'moondream', label: 'Moondream 2', size: 1.7, ram: 4, tier: 'Tiny', note: 'Tiny vision model: says what is in a picture or on screen. Good for older computers.', vision: true },
+  { name: 'qwen2.5vl:3b', label: 'Qwen2.5-VL 3B', size: 3.2, ram: 8, tier: 'Light', note: 'Vision model that reads screen text well. Best for “what’s this?” on screen.', vision: true },
+  { name: 'gemma3:4b', label: 'Gemma 3 4B', size: 3.3, ram: 8, tier: 'Light', note: 'Strong writing. Can also look at images.', vision: true },
   { name: 'qwen3:8b', label: 'Qwen3 8B', size: 5.2, ram: 16, tier: 'Balanced', note: 'Much better knowledge and reasoning.', tools: true },
   { name: 'llama3.1:8b', label: 'Llama 3.1 8B', size: 4.9, ram: 16, tier: 'Balanced', note: 'Popular, reliable general model.', tools: true },
-  { name: 'gemma3:12b', label: 'Gemma 3 12B', size: 8.1, ram: 16, tier: 'Balanced', note: 'High quality writing and analysis.' },
+  { name: 'gemma3:12b', label: 'Gemma 3 12B', size: 8.1, ram: 16, tier: 'Balanced', note: 'High quality writing and analysis. Can see images.', vision: true },
   { name: 'qwen3:14b', label: 'Qwen3 14B', size: 9.3, ram: 24, tier: 'Power', note: 'Near top quality on 24–32 GB machines.', tools: true },
-  { name: 'gemma3:27b', label: 'Gemma 3 27B', size: 17, ram: 32, tier: 'Power', note: 'Best quality here. Needs a strong computer.' },
+  { name: 'gemma3:27b', label: 'Gemma 3 27B', size: 17, ram: 32, tier: 'Power', note: 'Best quality here. Needs a strong computer. Can see images.', vision: true },
 ];
 
+export function bestVisionPick(ramGB = 8) {
+  return CATALOG.find((m) => m.name === (ramGB >= 8 ? 'qwen2.5vl:3b' : 'moondream'));
+}
 export function catalogFor(ramGB) {
   return CATALOG.map((m) => ({ ...m, fits: m.ram <= Math.max(4, ramGB || 8), installed: engine.models.some((x) => x.name === m.name) }));
 }

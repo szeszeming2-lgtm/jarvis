@@ -87,10 +87,12 @@ function build(m) {
       h('div', { class: 'msg-body selectable' },
         m.skill ? h('div', { class: 'pill accent', style: { marginBottom: '6px' }, text: `Skill · ${m.skill}` }) : null,
         m.content,
+        m.images?.length ? h('div', { class: 'msg-images' }, ...m.images.map((src) => h('img', { src, alt: 'Attached picture' }))) : null,
         m.attachment ? h('div', { class: 'chip', style: { marginTop: '8px' } }, iconNode('file'), h('span', { text: m.attachment.name })) : null));
   }
   if (m.role === 'tool') return toolRow(m);
   if (m.role === 'assistant') {
+    if (m.hidden) return null;
     if (m.error) return errorCard(m);
     if (!m.content && !m.thinking && !m.pending && m.tool_calls?.length) return null;
     const body = h('div', { class: 'msg-body selectable' });
@@ -123,6 +125,7 @@ function toolRow(m) {
   const row = h('div', { class: 'actions-row', dataset: { id: m.id } },
     h('span', { class: 'chip ' + cls, title: m.display }, iconNode(ic), h('span', { text: m.display || m.tool_name })));
   if (m.undo) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Undo', onclick: () => assistant.undo(m) }));
+  if (m.reminderId && !isNative) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', title: 'Save it to your phone or computer calendar so it reminds you even when JARVIS is closed', onclick: () => import('../reminders.js').then((r) => r.exportICS(m.reminderId)).catch((e) => toast(e.message, { bad: true })) }, iconNode('download'), 'Add to Calendar'));
   if (m.reveal) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Show in Finder', onclick: () => call('tool.reveal', { path: m.reveal }).catch((e) => toast(e.message, { bad: true })) }));
   if (m.files?.length) {
     const list = h('div', { style: { width: '100%', display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' } });
@@ -150,6 +153,9 @@ function errorCard(m) {
         try { await ollama.startEngine(); toast('Starting the AI engine…'); setTimeout(() => ollama.detect(), 2500); } catch (e) { toast(e.message, { bad: true }); }
       } }),
       h('button', { class: 'btn btn-sm', type: 'button', text: 'Open Model Manager', onclick: () => openSheet('models') }));
+  } else if (m.errorKind === 'novision') {
+    const pick = ollama.bestVisionPick(window.__deviceRam || 8);
+    actions.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: `Get ${pick.label} (free, ${pick.size} GB)`, onclick: () => openSheet('models') }));
   } else if (m.errorKind === 'nomodel') {
     actions.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Get a free model', onclick: () => openSheet('models') }));
   }

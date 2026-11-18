@@ -146,10 +146,28 @@ const browser = {
   },
   'app.openExternal': async ({ url }) => { window.open(url, '_blank', 'noopener'); return true; },
   'app.setHotkeys': async () => false,
+  'app.notify': async ({ title, body }) => {
+    chime();
+    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+      try { new Notification(title, { body, icon: 'assets/icon-192.png' }); } catch {}
+    }
+    return true;
+  },
+  'app.chime': async () => { chime(); return true; },
+  // Web: texts and calls open your own messages / phone app with everything filled in.
+  'messages.send': async ({ to, text }) => {
+    const apple = /Mac|iPhone|iPad/.test(navigator.userAgent);
+    location.href = `sms:${encodeURIComponent(to)}${apple ? '&' : '?'}body=${encodeURIComponent(text)}`;
+    return { drafted: true };
+  },
+  'phone.call': async ({ to, facetime }) => {
+    location.href = facetime && /Mac|iPhone|iPad/.test(navigator.userAgent) ? `facetime:${encodeURIComponent(to)}` : `tel:${encodeURIComponent(to)}`;
+    return { started: true };
+  },
   'app.setLaunchAtLogin': async () => false,
-  'file.save': async ({ name, content }) => {
+  'file.save': async ({ name, content, type }) => {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+    a.href = URL.createObjectURL(new Blob([content], { type: type || 'text/plain' }));
     a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     return { ok: true };
@@ -160,11 +178,33 @@ const browser = {
     inp.onchange = async () => {
       const f = inp.files[0];
       if (!f) return res(null);
+      if (f.type.startsWith('image/')) {
+        const dataUrl = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
+        return res({ name: f.name, path: f.name, imageDataUrl: dataUrl });
+      }
       res({ name: f.name, path: f.name, text: await f.text() });
     };
     inp.click();
   }),
 };
+
+let audioCtx = null;
+/** A short two-tone chime made with Web Audio (no sound files needed). */
+function chime() {
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    const t = audioCtx.currentTime;
+    for (const [i, f] of [[0, 880], [1, 1320]]) {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + i * 0.16);
+      g.gain.exponentialRampToValueAtTime(0.18, t + i * 0.16 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.16 + 0.45);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(t + i * 0.16); o.stop(t + i * 0.16 + 0.5);
+    }
+  } catch {}
+}
 
 async function localNetworkPermission() {
   for (const name of ['local-network-access', 'loopback-network', 'local-network']) {

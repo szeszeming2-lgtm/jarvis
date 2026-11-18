@@ -4,6 +4,8 @@ import { call, can, isNative } from './host.js';
 import { settings, set, logActivity } from './store.js';
 import { calculate } from './calc.js';
 import * as memory from './memory.js';
+import * as reminders from './reminders.js';
+import { describeWhen } from './when.js';
 import { bus, truncate } from './util.js';
 
 export const CATEGORIES = {
@@ -17,6 +19,10 @@ export const CATEGORIES = {
   system: { label: 'System settings', icon: 'sliders', desc: 'Volume, dark mode, Wi-Fi, display sleep.', levels: ['allow', 'ask', 'off'] },
   shortcuts: { label: 'Apple Shortcuts', icon: 'shortcut', desc: 'Run Shortcuts you made in the Shortcuts app.', levels: ['allow', 'ask', 'off'] },
   commands: { label: 'Terminal commands', icon: 'terminal', desc: 'Run shell commands. Always shows the exact command and asks every time.', levels: ['ask', 'off'] },
+  reminders: { label: 'Reminders', icon: 'bell', desc: 'Create and cancel reminders. The desktop app also adds them to your Reminders app so your phone alerts you.', levels: ['allow', 'ask', 'off'] },
+  messages: { label: 'Send texts', icon: 'message', desc: 'Text someone (or you). Always shows who it goes to and the exact message first.', levels: ['ask', 'off'] },
+  calls: { label: 'Phone calls', icon: 'phone', desc: 'Start a call through your phone or FaceTime. Always asks first.', levels: ['ask', 'off'] },
+  screen: { label: 'Look at your screen', icon: 'eye', desc: 'Identify what you point at. Only a small area around your click is looked at, by the AI on your computer.', levels: ['allow', 'ask', 'off'] },
 };
 
 const s = (description, props = {}, required = []) => ({ description, props, required });
@@ -123,6 +129,45 @@ export const TOOLS = [
     ask: (a) => ({ title: 'Run a terminal command', detail: a.reason || 'This runs with your user account\'s permissions.', preview: a.command, danger: true, mono: true }),
     run: (a) => call('tool.run_command', a), done: (r) => `Command finished (exit ${r.exitCode})`,
     forModel: (r) => ({ exitCode: r.exitCode, output: `<<output>>\n${r.output}\n<<end of output>>` }) },
+  { name: 'set_reminder', category: 'reminders', icon: 'bell', group: 'reminders',
+    ...s('Remind the user about something at a time. Use for "remind me…" requests.', {
+      text: { type: 'string', description: 'What to remind them about, e.g. "call the dentist"' },
+      when: { type: 'string', description: 'When, in plain words exactly as the user said it: "in 20 minutes", "at 5:30 pm", "tomorrow at 9am", "friday at 3pm"' },
+      text_me: { type: 'boolean', description: 'Also send the user a text message when it is due (only if they ask to be texted)' },
+    }, ['text', 'when']),
+    ask: (a) => ({ title: `Remind you: “${a.text}”`, detail: a.when }),
+    run: async (a) => { const r = await reminders.add(a.text, a.when, { textMe: !!a.text_me }); return { id: r.id, text: r.text, when: r.human, due: new Date(r.due).toISOString(), inSystemReminders: !!r.systemId }; },
+    done: (r) => `Reminder ${r.when}` },
+  { name: 'list_reminders', icon: 'bell', group: 'reminders',
+    ...s('List the user\'s upcoming reminders.'),
+    run: async () => { const list = reminders.upcoming(); return { count: list.length, reminders: list.slice(0, 20).map((r) => ({ text: r.text, when: describeWhen(new Date(r.due)) })) }; },
+    done: (r) => `${r.count} reminder${r.count === 1 ? '' : 's'}` },
+  { name: 'cancel_reminder', category: 'reminders', icon: 'bell', group: 'reminders',
+    ...s('Cancel upcoming reminders that match some words.', { about: { type: 'string' } }, ['about']),
+    prepare: async (a) => ({ matches: reminders.match(a.about) }),
+    skipIf: (a, p) => (!p.matches.length ? { ok: false, error: `No upcoming reminder matches “${a.about}”.` } : null),
+    ask: (a, p) => ({ title: `Cancel ${p.matches.length} reminder${p.matches.length === 1 ? '' : 's'}`, preview: p.matches.map((r) => `• ${r.text} — ${describeWhen(new Date(r.due))}`).join('\n') }),
+    run: async (a, p) => { for (const r of p.matches) await reminders.cancel(r.id); return { cancelled: p.matches.length }; },
+    done: (r) => `Cancelled ${r.cancelled}` },
+  { name: 'send_text', category: 'messages', icon: 'message', group: 'contact', alwaysAsk: true,
+    ...s('Send a text message. "to" is a phone number, an email for iMessage, a contact name (desktop app), or "me" for the user themself.', {
+      to: { type: 'string' }, message: { type: 'string' },
+    }, ['to', 'message']),
+    prepare: async (a) => resolveRecipient(a.to),
+    ask: (a, who) => ({ title: `${can('messages') ? 'Send' : 'Prepare'} a text to ${who.label}`, detail: can('messages') ? `Sent from your Messages app to ${who.address}.` : 'Your messages app opens with the text ready; you press Send.', preview: a.message }),
+    run: async (a, who) => { const r = await call('messages.send', { to: who.address, text: a.message }); return { to: who.label, sent: !!r?.sent, drafted: !!r?.drafted }; },
+    done: (r) => (r.sent ? `Texted ${r.to}` : `Text ready for ${r.to}`) },
+  { name: 'make_call', category: 'calls', icon: 'phone', group: 'contact', alwaysAsk: true,
+    ...s('Start a phone or FaceTime call. "to" is a phone number, email, or a contact name (desktop app).', { to: { type: 'string' }, facetime: { type: 'boolean' } }, ['to']),
+    prepare: async (a) => resolveRecipient(a.to, { forCall: true }),
+    ask: (a, who) => ({ title: `Call ${who.label}`, detail: `${a.facetime ? 'FaceTime' : 'Phone'} call to ${who.address}. Your ${a.facetime ? 'FaceTime app' : 'phone app'} opens and starts it.` }),
+    run: async (a, who) => { await call('phone.call', { to: who.address, facetime: !!a.facetime }); return { to: who.label }; },
+    done: (r) => `Calling ${r.to}` },
+  { name: 'look_at_screen', category: 'screen', icon: 'eye', group: 'contact',
+    ...s('Let the user point at something on their screen so you can identify it. Use when they ask "what is this?" about something on screen.', { question: { type: 'string' } }),
+    ask: () => ({ title: 'Look at what you point to on your screen', detail: 'You choose the spot. Only that area is looked at, on this computer.' }),
+    run: async (a) => { bus.emit('look.start', { question: a.question || '', fromAI: true }); return { note: 'The user is now choosing a spot. Their answer will arrive as a new message; do not guess what it is.' }; },
+    done: () => 'Look mode started' },
   { name: 'remember', category: 'memory', icon: 'brain', group: 'memory',
     ...s('Save a short fact about the user to long-term memory, only when they ask you to remember something or share a lasting preference.', { fact: { type: 'string' } }, ['fact']),
     run: async (a) => { const m = await memory.add(a.fact, 'jarvis'); return { saved: m.text }; }, done: (r) => `Remembered: ${truncate(r.saved, 46)}` },
@@ -149,6 +194,8 @@ export const GROUPS = {
   system: { label: 'System controls and Shortcuts', icon: 'sliders' },
   commands: { label: 'Terminal commands', icon: 'terminal' },
   memory: { label: 'Memory', icon: 'brain' },
+  reminders: { label: 'Reminders', icon: 'bell' },
+  contact: { label: 'Texts, calls and screen', icon: 'message' },
 };
 
 export function available(tool) {
@@ -253,4 +300,26 @@ function startTimer(minutes, label = '') {
   timers.set(id, { id, label, ends: Date.now() + ms, handle, human });
   bus.emit('timer.start', timers.get(id));
   return { id, human: label ? `${human} (${label})` : human, endsAt: new Date(Date.now() + ms).toLocaleTimeString() };
+}
+
+// ---------------------------------------------------------------- recipients
+/** Turn "me", a number, an email or a contact name into {label, address}. */
+async function resolveRecipient(to, { forCall = false } = {}) {
+  const raw = String(to || '').trim();
+  if (!raw) throw new Error('Who should it go to?');
+  if (/^(me|myself|my phone|self)$/i.test(raw)) {
+    const mine = settings.profile?.phone?.trim();
+    if (!mine) throw new Error('Add your phone number (or iMessage email) in Settings → General first, so I know where “me” is.');
+    return { label: 'you', address: mine };
+  }
+  const digits = raw.replace(/[\s().-]/g, '');
+  if (/^\+?\d{3,15}$/.test(digits)) return { label: raw, address: digits };
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return { label: raw, address: raw };
+  if (!can('contacts')) throw new Error(`I can’t look up contacts in the web version. Give me ${forCall ? 'the number' : 'the number or iMessage email'} for ${raw}.`);
+  const found = await call('contacts.find', { name: raw });
+  const list = (found?.matches || []).filter((m) => (forCall ? m.phones?.length : m.phones?.length || m.emails?.length));
+  if (!list.length) throw new Error(`I couldn’t find ${raw} in your contacts.`);
+  const c = list[0];
+  const address = c.phones?.[0] || c.emails?.[0];
+  return { label: `${c.name}${list.length > 1 ? ` (best of ${list.length} matches)` : ''}`, address };
 }

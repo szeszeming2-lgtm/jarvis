@@ -19,6 +19,7 @@ registerTab('general', (body) => {
       row('Your name', 'Optional. Used in greetings.', text(settings.userName, (v) => { set('userName', v.trim()); bus.emit('identity'); }, { width: '200px', placeholder: 'Your name', label: 'Your name' })),
       row('How it addresses you', '', select(settings.honorific, [['sir', 'Sir'], ['ma\'am', 'Ma\'am'], ['boss', 'Boss'], ['name', 'By my name'], ['none', 'Nothing special']], (v) => set('honorific', v), 'Honorific')),
       row('Personality', 'The overall tone of replies.', select(settings.personality, [['classic', 'Classic butler (calm, witty)'], ['friendly', 'Friendly and casual'], ['concise', 'Brief and to the point'], ['custom', 'Only my instructions']], (v) => set('personality', v), 'Personality')),
+      row('Your phone number', 'Optional, for “text me” and reminders by text. Stays on this device. Use your iMessage email if you prefer.', text(settings.profile?.phone, (v) => set('profile.phone', v.trim()), { width: '200px', placeholder: '+1 555 123 4567', label: 'Your phone number' })),
       row('Reply language', 'Auto replies in the language you use.', select(settings.replyLanguage, ['auto', 'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Cantonese', 'Japanese', 'Korean', 'Hindi', 'Arabic', 'Russian', 'Dutch', 'Turkish', 'Vietnamese', 'Indonesian'].map((l) => [l, l === 'auto' ? 'Automatic' : l]), (v) => set('replyLanguage', v), 'Reply language')),
     )),
     section('Custom instructions', 'Added to every conversation. Stored only on this device.', rows(
@@ -28,6 +29,7 @@ registerTab('general', (body) => {
     section('Behaviour', '', rows(
       row('Instant commands', 'Handle simple requests (open apps, timers, maths, volume) right away without the AI. Faster and works offline with no model.', toggle(settings.instantCommands, (v) => set('instantCommands', v), 'Instant commands')),
       row('Smart conversation titles', 'Ask the AI to name each conversation. Uses a little extra processing.', toggle(settings.smartTitles, (v) => set('smartTitles', v), 'Smart titles')),
+      can('reminders') ? row('Add reminders to the Reminders app', 'So your iPhone and other devices remind you too, even when JARVIS is closed.', toggle(settings.reminders?.system !== false, (v) => set('reminders.system', v), 'System reminders')) : null,
       can('loginItem') ? row('Open at login', 'Start JARVIS when you log in to your computer.', toggle(settings.launchAtLogin, async (v) => { try { await call('app.setLaunchAtLogin', { on: v }); set('launchAtLogin', v); } catch (e) { toast(e.message, { bad: true }); } }, 'Open at login')) : null,
       row('Setup wizard', 'Run the first-time setup again.', h('button', { class: 'btn btn-sm', type: 'button', text: 'Run setup', onclick: () => { closeSheet(); bus.emit('wizard.open'); } })),
     )),
@@ -133,7 +135,7 @@ registerTab('home', (body) => {
       row('Status panel', 'The panel on the right (hidden on narrow windows).', toggle(settings.home.hud, (v) => { set('home.hud', v); bus.emit('home'); }, 'Status panel')),
       row('Suggestions on the welcome screen', '', toggle(settings.home.suggestions, (v) => { set('home.suggestions', v); bus.emit('home'); }, 'Suggestions')),
     )),
-    section('Status panel cards', '', rows(hudToggle('clock', 'Clock'), hudToggle('system', 'System'), hudToggle('ai', 'AI core'), hudToggle('voice', 'Voice'), hudToggle('quick', 'Quick actions'))),
+    section('Status panel cards', '', rows(hudToggle('clock', 'Clock'), hudToggle('reminders', 'Reminders'), hudToggle('system', 'System'), hudToggle('ai', 'AI core'), hudToggle('voice', 'Voice'), hudToggle('quick', 'Quick actions'))),
     section('Quick actions', 'Buttons in the status panel. Each one sends a message to JARVIS.', qList,
       h('div', { class: 'flex', style: { marginTop: '10px' } },
         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => editQuick(-1) }, iconNode('plus'), 'Add quick action'),
@@ -145,12 +147,14 @@ registerTab('home', (body) => {
 const SHORTCUT_LABELS = {
   newChat: ['New conversation', ''], search: ['Search conversations', ''], settings: ['Open settings', ''], focusInput: ['Focus the message box', ''],
   listen: ['Start / stop listening', ''], stop: ['Stop talking or generating', ''], toggleSidebar: ['Show / hide conversations', ''], toggleHud: ['Show / hide status panel', ''],
+  look: ['What’s this? (identify on screen)', ''],
   globalSummon: ['Summon JARVIS from anywhere', 'Works even when another app is in front. Brings JARVIS forward and starts listening.'],
+  globalLook: ['“What’s this?” from anywhere', 'Then click anything on your screen and JARVIS identifies it.'],
 };
 registerTab('shortcuts', (body) => {
   let recording = null;
   const r = rows(...Object.entries(SHORTCUT_LABELS).map(([key, [label, desc]]) => {
-    if (key === 'globalSummon' && !can('hotkey')) return null;
+    if ((key === 'globalSummon' || key === 'globalLook') && !can('hotkey')) return null;
     const k = h('button', { class: 'kbd', type: 'button', text: prettyKey(settings.shortcuts[key]), title: 'Click, then press the new keys', onclick: () => {
       if (recording) recording.classList.remove('rec');
       recording = k;
@@ -167,7 +171,7 @@ registerTab('shortcuts', (body) => {
     const combo = comboFromEvent(e);
     if (!combo) return;
     const key = recording.dataset.key;
-    if (key === 'globalSummon' && !/Mod|Alt|Ctrl/.test(combo)) { toast('A global shortcut needs ⌘, ⌥ or ⌃.', { bad: true }); return; }
+    if (key.startsWith('global') && !/Mod|Alt|Ctrl/.test(combo)) { toast('A global shortcut needs ⌘, ⌥ or ⌃.', { bad: true }); return; }
     set(`shortcuts.${key}`, combo);
     recording.textContent = prettyKey(combo);
     recording.classList.remove('rec');

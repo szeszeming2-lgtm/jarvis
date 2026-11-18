@@ -8,6 +8,8 @@ import { voice } from '../voice.js';
 import { call, can, info, isNative } from '../host.js';
 import { menu, dialog, toast } from './common.js';
 import { timers } from '../tools.js';
+import * as reminders from '../reminders.js';
+import { describeWhen } from '../when.js';
 
 // ------------------------------------------------------------------ sidebar
 export function initSidebar() {
@@ -73,17 +75,20 @@ export function initHud() {
     hud.replaceChildren();
     const c = settings.home.hudCards;
     if (c.clock) hud.append(cards.clock = card('Local time', h('div', { class: 'clock', id: 'hudClock' }), h('div', { class: 'clock-date', id: 'hudDate' })));
+    if (c.reminders) hud.append(cards.reminders = card('Reminders', h('div', { id: 'hudRem' })));
     if (c.system) hud.append(cards.system = card('System', h('div', { id: 'hudSys' }, h('div', { class: 'muted', style: { fontSize: '12px' }, text: can('status') ? 'Reading sensors…' : 'Live system stats need the desktop app.' }))));
     if (c.ai) hud.append(cards.ai = card('AI core', h('div', { id: 'hudAi' })));
     if (c.voice) hud.append(cards.voice = card('Voice', h('div', { id: 'hudVoice' })));
     if (c.quick) hud.append(cards.quick = card('Quick actions', h('div', { class: 'quick-grid', id: 'hudQuick' })));
-    tickClock(); drawAi(); drawVoice(); drawQuick(); pollStatus(true);
+    tickClock(); drawAi(); drawVoice(); drawQuick(); drawRem(); pollStatus(true);
   };
   build();
   bus.on('home', build);
   bus.on('engine', drawAi);
   bus.on('settings', (d) => { if (d.path.startsWith('ai.')) drawAi(); if (d.path.startsWith('voice.')) drawVoice(); });
   bus.on('voice.state', drawVoice);
+  bus.on('reminders', drawRem);
+  setInterval(drawRem, 30000);
   bus.on('timer.start', drawVoice);
   bus.on('timer.done', drawVoice);
   setInterval(tickClock, 1000);
@@ -173,6 +178,17 @@ function drawVoice() {
   box.replaceChildren(...kids);
 }
 setInterval(() => { if (timers.size) drawVoice(); }, 1000);
+
+function drawRem() {
+  const box = $('#hudRem');
+  if (!box) return;
+  const list = reminders.upcoming().slice(0, 5);
+  if (!list.length) { box.replaceChildren(h('div', { class: 'muted', style: { fontSize: '12px', lineHeight: 1.5 }, text: 'None yet. Try “remind me in 20 minutes to stretch”.' })); return; }
+  box.replaceChildren(...list.map((r) => h('div', { class: 'rem-row' },
+    iconNode('bell'),
+    h('div', { class: 'grow' }, h('div', { text: r.text }), h('span', { text: describeWhen(new Date(r.due)) })),
+    h('button', { type: 'button', title: 'Cancel reminder', 'aria-label': `Cancel reminder: ${r.text}`, onclick: () => reminders.cancel(r.id) }, iconNode('x')))));
+}
 
 function drawQuick() {
   const box = $('#hudQuick');
