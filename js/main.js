@@ -12,6 +12,9 @@ import * as people from './people.js';
 import { isMobile, isIOS } from './ui/phone.js';
 import { describeWhen } from './when.js';
 import './ui/lists.js';
+import './ui/workout.js';
+import './ui/plugins.js';
+import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
 import * as look from './ui/look.js';
 import * as assistant from './assistant.js';
@@ -47,7 +50,7 @@ async function boot() {
   if (!settings.setupDone && !isNative && isMobile() && settings.ai.provider !== 'phone') { settings.ai.provider = 'phone'; settings.ai.model = ''; }
   applyAppearance();
   hydrateIcons();
-  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load(), lists.load(), people.load()]);
+  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load(), lists.load(), people.load(), workout.load()]);
   sessions.create();
 
   app.viz = new Visualizer($('#visualizer'));
@@ -157,9 +160,9 @@ const PHONE_SUGGESTIONS = [
   ['sun', 'Weather', "what's the weather"],
   ['list', 'Shopping list', "what's on my shopping list"],
   ['bell', 'Remind me in 1 hour', 'remind me in 1 hour to take a break'],
-  ['coffee', 'Morning briefing', '/brief'],
-  ['sparkles', 'What can you do?', 'What can you do for me? Give me a few examples.'],
-  ['calculator', '18% tip on $64', 'what is 18% of 64'],
+  ['cpu', 'System report', 'system report'],
+  ['zap', 'Track my workout', 'track my workout'],
+  ['puzzle', 'What should I add?', 'what should I add'],
 ];
 function renderWelcome() {
   const name = settings.userName?.trim();

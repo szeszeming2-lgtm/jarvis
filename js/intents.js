@@ -3,6 +3,8 @@
 import { looksLikeMath } from './calc.js';
 import { parseWhen, describeWhen } from './when.js';
 import { summary as weatherSummary } from './weather.js';
+import { summaryText as workoutSummaryText } from './workout.js';
+import { knows as knowsUnit } from './converter.js';
 
 const listWords = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]);
 
@@ -111,8 +113,24 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((m = low.match(/^turn (on|off) (the )?wi-?fi$|^turn (the )?wi-?fi (on|off)$|^wi-?fi (on|off)$/))) return { tool: 'set_wifi', args: { on: (m[1] || m[4] || m[5]) === 'on' } };
   if (/^(sleep|turn off) (the )?(display|screen|monitor)$|^put (the )?(display|screen) to sleep$/.test(low)) return { tool: 'sleep_display', args: {} };
 
+  // Plugins: "what should I add?"
+  if (/^(what should i (add|try|use|turn on)( next)?|(any )?(recommendations?|suggestions?)|recommend (me )?(something|plugins?|features?)|what (plugins|features) (should i|do you) (add|have|recommend)|(show|open) (my )?plugins|plugins|what else can you do)$/.test(low)) return { local: 'recommend' };
+
+  // Workouts: "track my squats", "open the camera", "log 3 sets of 10 push-ups", "I ran 5 km in 30 minutes"
+  const EX = { squat: 'squats', squats: 'squats', pushup: 'pushups', pushups: 'pushups', 'push-up': 'pushups', 'push-ups': 'pushups', 'push up': 'pushups', 'push ups': 'pushups', 'press ups': 'pushups', 'press-ups': 'pushups', 'jumping jack': 'jacks', 'jumping jacks': 'jacks', jacks: 'jacks', curl: 'curls', curls: 'curls', 'bicep curls': 'curls', 'bicep curl': 'curls', plank: 'plank', planks: 'plank' };
+  if (/^(?:start|begin|open|let'?s do|do)(?: a| my| the)? (?:workout|exercise|training|workout coach)$|^(?:track|count|watch|coach) my (?:workout|exercise|reps|training)$|^open (?:the |my )?camera(?: (?:and|to) (?:track|count|watch) (?:my )?(?:workout|reps|exercise))?$|^workout(?: coach)?$|^(?:let'?s )?work ?out$/.test(low)) return { tool: 'start_workout', args: {} };
+  if ((r = low.match(/^(?:track|count|watch|coach|start|let'?s do|do)(?: my| some)? (squats?|push-? ?ups?|press-? ?ups|jumping jacks?|jacks|(?:bicep )?curls?|planks?)(?: with (?:the )?camera)?$/))) return { tool: 'start_workout', args: { exercise: EX[r[1].replace(/\s+/g, ' ')] || EX[r[1].replace(/[- ]/g, '')] || 'squats' } };
+  if ((r = low.match(/^(?:log|record|add|i did|i just did|did|just did)\s+(?:(\d+)\s*(?:sets?|x)\s*(?:of\s*)?)?(\d+)\s+([a-z][a-z -]{1,24}?)(?:\s+(?:at|with)\s+(\d+(?:\.\d+)?)\s*(kg|kgs|kilos?|lbs?|pounds?))?$/)) && !/\b(minutes?|mins?|hours?|reminders?|items?|things?)\b/.test(r[3])) return { tool: 'log_workout', args: { exercise: r[3], reps: +r[2], sets: r[1] ? +r[1] : undefined, weight: r[4] ? +r[4] : undefined, unit: r[5] ? (/^(lb|pound)/.test(r[5]) ? 'lb' : 'kg') : undefined } };
+  if ((r = low.match(/^(?:i )?(?:just )?(ran|run|jogged|walked|cycled|biked|rode|swam)\s+(\d+(?:\.\d+)?)\s*(km|kms|kilometers?|kilometres?|miles?|mi)(?:\s+in\s+(\d+)\s*(?:min|mins|minutes))?$/))) return { tool: 'log_workout', args: { exercise: { ran: 'running', run: 'running', jogged: 'running', walked: 'walking', cycled: 'cycling', biked: 'cycling', rode: 'cycling', swam: 'swimming' }[r[1]], km: /^mi/.test(r[3]) ? Math.round(+r[2] * 1.609344 * 100) / 100 : +r[2], minutes: r[4] ? +r[4] : undefined } };
+  if ((r = low.match(/^(?:i )?(?:just )?(?:did|worked out|exercised|trained|did yoga|ran|walked|cycled|swam|stretched)(?: for)? (\d+)\s*(?:min|mins|minutes)(?: of ([a-z ]{2,24}))?$/))) return { tool: 'log_workout', args: { exercise: r[2] || (/yoga/.test(low) ? 'yoga' : /ran/.test(low) ? 'running' : /walk/.test(low) ? 'walking' : /cycl/.test(low) ? 'cycling' : /swam/.test(low) ? 'swimming' : /stretch/.test(low) ? 'stretching' : 'workout'), minutes: +r[1] } };
+  if (/^(how many workouts( have i done| did i do)?|my workouts|workout (summary|stats|history|report|log)|show (me )?my workouts|how(?:'?s| is| am i doing with) my (workouts?|training|fitness|exercise))( this (week|month))?$/.test(low)) return { tool: 'workout_summary', args: { days: /month/.test(low) ? 30 : 7 } };
+
+  // Units: "convert 5 miles to km", "70 f in c", "how many grams in a pound"
+  if ((r = low.match(/^(?:convert |what(?:'s| is) |how much is )?(-?\d+(?:\.\d+)?)\s*([a-z°/²0-9 .]+?)\s+(?:to|in|into|as)\s+([a-z°/²0-9 .]+?)$/)) && knowsUnit(r[2]) && knowsUnit(r[3])) return { tool: 'convert_units', args: { value: +r[1], from: r[2], to: r[3] } };
+  if ((r = low.match(/^how many ([a-z°/² .]+?) (?:are )?(?:in|per) (?:a |an |one )?([a-z°/² .]+?)$/)) && knowsUnit(r[1]) && knowsUnit(r[2])) return { tool: 'convert_units', args: { value: 1, from: r[2], to: r[1] } };
+
   // Status
-  if (/^(system (status|report|info|check)|status report|diagnostics|how('?s| is) my (computer|mac|laptop|pc) doing|(check )?(my )?battery( level| status)?|how much (battery|memory|ram|storage|disk space) (do i have|is left)( left)?)$/.test(low)) return { tool: 'system_status', args: {} };
+  if (/^(system (status|report|info|check)|status report|diagnostics|(phone|device) (status|report|check)|check my (phone|device)|how('?s| is) my (computer|mac|laptop|pc|phone|iphone|device) doing|(check )?(my )?battery( level| status)?|how much (battery|memory|ram|storage|disk space) (do i have|is left)( left)?)$/.test(low)) return { tool: 'system_status', args: {} };
 
   // Timers
   if ((m = low.match(/^(?:set |start )?(?:a )?timer (?:for )?(\d+(?:\.\d+)?) ?(seconds?|secs?|minutes?|mins?|hours?|hrs?)(?: (?:for|called|named) (.+))?$/) || low.match(/^(?:set |start )?(?:a |an )?(\d+(?:\.\d+)?)[- ]?(seconds?|secs?|minutes?|mins?|hours?|hrs?) timer(?: (?:for|called|named) (.+))?$/))) {
@@ -137,6 +155,7 @@ export function match(raw, { customSkills = [] } = {}) {
 
   if ((m = t.match(/^run (?:the |my )?shortcut (?:called |named )?["“]?(.+?)["”]?$/i))) return { tool: 'run_shortcut', args: { name: m[1] } };
   // Open things
+  if (/^open (the |my )?camera$/.test(low)) return { tool: 'start_workout', args: {} };
   if ((m = t.match(/^(?:open|launch|start|bring up|fire up|go to)(?: up)? (?:the |my )?(.+?)(?: app| application| website| site| page)?$/i))) {
     const target = m[1].trim();
     const tl = target.toLowerCase();
@@ -195,6 +214,10 @@ export function reply(intent, res, name = 'JARVIS') {
     case 'clear_list': return `Your ${r.list} list is empty now.`;
     case 'save_contact': return `Saved ${r.name}: ${r.number}. You can now say “text ${r.name} …” or “call ${r.name}”.`;
     case 'get_weather': return weatherSummary(r);
+    case 'start_workout': return `Opening the workout coach for ${r.exercise.toLowerCase()}. Prop your phone up so your whole body is in view, and I’ll count every rep.`;
+    case 'log_workout': return `Logged **${r.logged}**. That’s ${r.week} workout${r.week === 1 ? '' : 's'} this week${r.streak > 1 ? `, and a ${r.streak}-day streak 🔥` : ''}.`;
+    case 'workout_summary': return workoutSummaryText(r);
+    case 'convert_units': return r.text + '.';
     case 'set_home_city': return `Got it — your home city is ${r.name}. Ask “what’s the weather?” any time.`;
     default: return 'Done.';
   }
@@ -205,6 +228,19 @@ function splitList(text) {
 }
 
 export function statusText(r) {
+  if (r.web) {
+    const gb = (b) => (b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round((b || 0) / 1e6) + ' MB');
+    const lines = [
+      `**${r.device}${r.os ? ' · ' + r.os : ''}**${r.installed ? ' · on your Home Screen' : ' · in the browser'}`,
+      `- Network: ${r.online ? 'online' : 'offline'}${r.network ? ` (${r.network})` : ''}`,
+      r.storage ? `- Storage used by JARVIS: ${gb(r.storage.used)}${r.storage.quota ? ` of ${gb(r.storage.quota)} allowed` : ''}` : '',
+      r.battery ? `- Battery: ${r.battery.level}%${r.battery.charging ? ' and charging' : ''}` : '',
+      r.memoryGB ? `- Memory: about ${r.memoryGB} GB` : '',
+      `- On-device AI: ${r.gpu ? 'supported' : 'not supported in this browser'}`,
+      r.app ? `- JARVIS: ${r.app.upcomingReminders} reminder${r.app.upcomingReminders === 1 ? '' : 's'} coming up · ${r.app.listItems} list item${r.app.listItems === 1 ? '' : 's'} · ${r.app.workoutsThisWeek} workout${r.app.workoutsThisWeek === 1 ? '' : 's'} this week${r.app.streak > 1 ? ` (${r.app.streak}-day streak)` : ''} · ${r.app.people} saved ${r.app.people === 1 ? 'person' : 'people'}` : '',
+    ];
+    return `All systems nominal.\n\n${lines.filter(Boolean).join('\n')}`;
+  }
   const parts = [];
   if (r.cpu != null) parts.push(`CPU load is **${Math.round(r.cpu)}%**`);
   if (r.memTotal) parts.push(`memory is **${Math.round((r.memUsed / r.memTotal) * 100)}%** used (${(r.memUsed / 1e9).toFixed(1)} of ${(r.memTotal / 1e9).toFixed(0)} GB)`);

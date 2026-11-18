@@ -8,6 +8,9 @@ import * as reminders from './reminders.js';
 import * as lists from './lists.js';
 import * as people from './people.js';
 import * as weather from './weather.js';
+import * as workout from './workout.js';
+import { convert } from './converter.js';
+import { EXERCISES } from './reps.js';
 import { describeWhen } from './when.js';
 import { bus, truncate } from './util.js';
 
@@ -100,9 +103,22 @@ export const TOOLS = [
   { name: 'set_timer', icon: 'clock', group: 'basics',
     ...s('Start a countdown timer. JARVIS announces it when time is up.', { minutes: { type: 'number' }, label: { type: 'string' } }, ['minutes']),
     run: async (a) => startTimer(Number(a.minutes), a.label), done: (r) => `Timer: ${r.human}` },
-  { name: 'system_status', icon: 'cpu', needs: 'status', group: 'basics',
+  { name: 'system_status', icon: 'cpu', group: 'status',
     ...s('Get this computer\'s status: CPU load, memory, battery, storage, uptime.'),
-    run: () => call('system.status'), done: () => 'Checked system status' },
+    run: async () => { const r = await call('system.status'); if (r.web) Object.assign(r, appStats()); return r; }, done: () => 'Checked system status' },
+  { name: 'convert_units', icon: 'calculator', group: 'convert',
+    ...s('Convert between units (length, weight, cooking volumes, temperature, speed, time, data, area).', { value: { type: 'number' }, from: { type: 'string' }, to: { type: 'string' } }, ['value', 'from', 'to']),
+    run: async (a) => convert(a.value, a.from, a.to), done: (r) => r.text.replace(/\*/g, '') },
+  { name: 'start_workout', icon: 'zap', group: 'fitness',
+    ...s('Open the workout coach: the camera counts reps. Exercises: squats, pushups, jacks (jumping jacks), curls, plank.', { exercise: { type: 'string', enum: Object.keys(EXERCISES) } }),
+    run: async (a) => { bus.emit('workout.open', { exercise: a.exercise || 'squats' }); return { exercise: EXERCISES[a.exercise]?.label || 'Squats' }; }, done: (r) => `Coach: ${r.exercise}` },
+  { name: 'log_workout', icon: 'zap', group: 'fitness',
+    ...s('Log a workout the user did (reps, sets, weight, minutes or distance).', { exercise: { type: 'string' }, reps: { type: 'number' }, sets: { type: 'number' }, weight: { type: 'number' }, unit: { type: 'string', enum: ['kg', 'lb'] }, minutes: { type: 'number' }, km: { type: 'number' } }, ['exercise']),
+    run: async (a) => { const e = workout.add({ exercise: a.exercise, reps: a.reps, sets: a.sets, weight: a.weight, unit: a.unit, seconds: a.minutes ? Math.round(a.minutes * 60) : undefined, distanceKm: a.km }); const sum = workout.summary(7); return { logged: workout.describe(e), week: sum.sessions, streak: sum.streak }; },
+    done: (r) => `Logged ${r.logged}` },
+  { name: 'workout_summary', icon: 'zap', group: 'fitness',
+    ...s('Summarise the user\'s recent workouts.', { days: { type: 'number' } }),
+    run: async (a) => workout.summary(a.days || 7), done: (r) => `${r.sessions} workouts in ${r.days} days` },
   { name: 'set_volume', category: 'system', icon: 'volume', needs: 'system', group: 'system',
     ...s('Set the output volume (0-100), or mute/unmute.', { level: { type: 'number', description: '0 to 100' }, mute: { type: 'boolean' } }),
     ask: (a) => ({ title: a.delta ? `Turn the volume ${a.delta > 0 ? 'up' : 'down'}` : a.mute === true ? 'Mute sound' : a.mute === false && a.level == null ? 'Unmute sound' : `Set volume to ${Math.round(a.level)}%` }),
@@ -166,7 +182,7 @@ export const TOOLS = [
     ask: (a, who) => ({ title: `Call ${who.label}`, detail: `${a.facetime ? 'FaceTime' : 'Phone'} call to ${who.address}. Your ${a.facetime ? 'FaceTime app' : 'phone app'} opens and starts it.` }),
     run: async (a, who) => { await call('phone.call', { to: who.address, facetime: !!a.facetime }); return { to: who.label }; },
     done: (r) => `Calling ${r.to}` },
-  { name: 'look_at_screen', category: 'screen', icon: 'eye', group: 'contact',
+  { name: 'look_at_screen', category: 'screen', icon: 'eye', group: 'look',
     ...s('Let the user point at something on their screen so you can identify it. Use when they ask "what is this?" about something on screen.', { question: { type: 'string' } }),
     ask: () => ({ title: 'Look at what you point to on your screen', detail: 'You choose the spot. Only that area is looked at, on this computer.' }),
     run: async (a) => { bus.emit('look.start', { question: a.question || '', fromAI: true }); return { note: 'The user is now choosing a spot. Their answer will arrive as a new message; do not guess what it is.' }; },
@@ -191,10 +207,10 @@ export const TOOLS = [
     ...s('Save a person\'s phone number (or iMessage email) so the user can text or call them by name.', { name: { type: 'string' }, number: { type: 'string' } }, ['name', 'number']),
     run: async (a) => { const p = people.upsert({ name: a.name, phone: a.number }); return { name: p.name, number: p.phone }; },
     done: (r) => `Saved ${r.name}` },
-  { name: 'get_weather', category: 'web', icon: 'sun', group: 'web',
+  { name: 'get_weather', category: 'web', icon: 'sun', group: 'weather',
     ...s('Get the current weather and the forecast for today and tomorrow. Leave place empty for the user\'s home city.', { place: { type: 'string' } }),
     run: async (a) => weather.forecast(a.place), done: (r) => `${r.now.icon} ${r.now.temp}${r.units} in ${r.place.split(',')[0]}` },
-  { name: 'set_home_city', icon: 'home', group: 'web',
+  { name: 'set_home_city', icon: 'home', group: 'weather',
     ...s('Remember the user\'s home city for weather.', { place: { type: 'string' } }, ['place']),
     run: async (a) => weather.setHome(a.place), done: (r) => `Home city: ${r.name}` },
   { name: 'remember', category: 'memory', icon: 'brain', group: 'memory',
@@ -225,7 +241,12 @@ export const GROUPS = {
   memory: { label: 'Memory', icon: 'brain' },
   reminders: { label: 'Reminders', icon: 'bell' },
   lists: { label: 'Lists (shopping, to-do, notes)', icon: 'list' },
-  contact: { label: 'Texts, calls and screen', icon: 'message' },
+  contact: { label: 'Texts and calls', icon: 'message' },
+  look: { label: 'What’s this? (screen and pictures)', icon: 'eye' },
+  weather: { label: 'Weather', icon: 'sun' },
+  fitness: { label: 'Workout coach and log', icon: 'zap' },
+  convert: { label: 'Unit converter', icon: 'calculator' },
+  status: { label: 'System report', icon: 'cpu' },
 };
 
 export function available(tool) {
@@ -258,7 +279,7 @@ export async function execute(name, args = {}, ctx = {}) {
   const tool = byName(name);
   if (!tool) return { ok: false, error: `There is no ability called ${name}.` };
   if (tool.needs && !can(tool.needs)) return { ok: false, error: isNative ? 'This ability is not supported on this device yet.' : 'This ability needs the JARVIS desktop app.' };
-  if ((settings.skills?.disabledGroups || []).includes(tool.group)) return { ok: false, declined: true, error: 'The user switched this ability off in Skills.' };
+  if ((settings.skills?.disabledGroups || []).includes(tool.group)) return { ok: false, declined: true, error: 'That plugin is turned off. Turn it on in Settings → Plugins.' };
   const level = ctx.preApproved && tool.category !== 'commands' ? 'allow' : levelFor(tool);
   const label = CATEGORIES[tool.category]?.label || tool.name;
   if (level === 'off') return { ok: false, declined: true, error: `The user switched off "${label}" in Settings → Permissions.` };
@@ -354,4 +375,16 @@ async function resolveRecipient(to, { forCall = false } = {}) {
   const c = list[0];
   const address = c.phones?.[0] || c.emails?.[0];
   return { label: `${c.name}${list.length > 1 ? ` (best of ${list.length} matches)` : ''}`, address };
+}
+
+// ---------------------------------------------------------------- system report extras (web)
+function appStats() {
+  const sum = workout.summary(7);
+  return {
+    app: {
+      upcomingReminders: reminders.upcoming().length,
+      listItems: lists.names().reduce((n, k) => n + lists.open(k).length, 0),
+      workoutsThisWeek: sum.sessions, streak: sum.streak, people: people.all().length, memories: memory.all().length,
+    },
+  };
 }

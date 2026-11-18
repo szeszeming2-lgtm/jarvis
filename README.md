@@ -11,7 +11,11 @@ JARVIS is a free, private AI assistant. The AI runs on your own computer with [O
 3. In setup, choose **On this device** and download a free AI model once (about 0.3–1 GB, Wi-Fi recommended). After that it works offline, with no account and nothing sent anywhere.
    This needs iOS 26 or newer, or a recent Android phone with Chrome.
 
-Even without the AI download, the phone version does reminders (with **Add to iPhone Calendar**), shopping and to-do lists, notes, texts and calls to saved people, timers, weather, and maths.
+**Workout Coach:** prop your phone up and say “track my squats”. The camera counts your reps (squats, push-ups, jumping jacks, curls, plank time) using Google’s free MediaPipe body tracking, entirely on your phone, and keeps a workout log and streak.
+
+**Plugins:** Settings → Plugins lets you turn features on and off and recommends what to try next (or just ask “what should I add?”).
+
+Even without the AI download, the phone version does reminders (with **Add to iPhone Calendar**), shopping and to-do lists, notes, texts and calls to saved people, opening your apps (“open Spotify”), a system report, a unit converter, timers, weather, and maths.
 
 ## On a computer
 

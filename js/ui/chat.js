@@ -107,6 +107,7 @@ function build(m) {
       if (m.streaming) c.append(h('span', { class: 'cursor' }));
       body.append(c);
     }
+    if (m.buttons?.length) body.append(h('div', { class: 'msg-buttons' }, ...m.buttons.map((b, i) => h('button', { class: 'btn btn-sm' + (i === 0 ? ' btn-primary' : ''), type: 'button', text: b.label, onclick: () => pressButton(b) }))));
     if (m.stopped) body.append(h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '6px' }, text: 'Stopped.' }));
     const meta = h('div', { class: 'msg-meta' },
       h('button', { type: 'button', title: 'Copy', onclick: () => copy(m.content) }, iconNode('copy'), 'Copy'),
@@ -163,6 +164,19 @@ function errorCard(m) {
   return h('div', { class: 'card glass notice-card', dataset: { id: m.id } },
     h('span', { class: 'ic' }, iconNode('alert')),
     h('div', { class: 'grow' }, h('div', { text: m.error, style: { fontSize: '13.5px', lineHeight: 1.5 } }), actions));
+}
+
+async function pressButton(b) {
+  if (b.send) return assistant.send(b.send);
+  if (b.open) return openSheet(b.open);
+  if (b.plugin) {
+    const p = await import('../plugins.js');
+    const { runSuggestion } = await import('./plugins.js');
+    const plugin = b.plugin === 'ai' ? { id: 'ai', name: 'The free AI', open: 'models' } : p.PLUGINS.find((x) => x.id === b.plugin);
+    if (!plugin) return;
+    if (b.plugin === 'ai') return openSheet('models');
+    runSuggestion({ plugin, action: b.action });
+  }
 }
 
 function retry(m) {

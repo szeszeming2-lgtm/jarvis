@@ -70,6 +70,17 @@ export async function send(text, { viaVoice = false, attachment = null, images =
   if (intent?.local === 'stop') { stop(); return; }
   if (intent?.local === 'newchat') { sessions.create(); return; }
   if (intent?.local === 'look') { bus.emit('look.start', { question: text, viaVoice }); return; }
+  if (intent?.local === 'recommend') {
+    const { recommend } = await import('./plugins.js');
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    const recs = await recommend(3);
+    const reply = recs.length
+      ? `Here’s what I’d add next:\n\n${recs.map((r) => `- **${r.plugin.name}**: ${r.reason}`).join('\n')}\n\nAll plugins are in Settings → Plugins.`
+      : 'You’re already using everything I can do. You can turn plugins on or off in Settings → Plugins.';
+    push({ role: 'assistant', content: reply, instant: true, buttons: [...recs.map((r) => ({ label: `${r.action === 'setup' ? 'Set up' : r.action === 'enable' ? 'Add' : 'Try'} ${r.plugin.name}`, plugin: r.plugin.id, action: r.action })), { label: 'All plugins', open: 'plugins' }] });
+    if (speakOn) voiceMod.speak(reply);
+    return;
+  }
   if (intent?.local === 'share') {
     const { shareApp, appUrl } = await import('./ui/share.js');
     push({ role: 'user', content: text, voice: viaVoice || undefined });

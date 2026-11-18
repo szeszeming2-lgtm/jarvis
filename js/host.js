@@ -50,7 +50,7 @@ const browser = {
       capabilities: {
         voiceOut: 'speechSynthesis' in window,
         voiceIn: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
-        voiceInOffline: false, wake: false, apps: false, files: false, system: false,
+        voiceInOffline: false, wake: false, apps: /iPhone|iPad|iPod|Android/i.test(ua), files: false, system: false,
         commands: false, hotkey: false, status: false, ollamaControl: false, documents: false, shortcuts: false,
       },
     };
@@ -146,6 +146,29 @@ const browser = {
   },
   'app.openExternal': async ({ url }) => { window.open(url, '_blank', 'noopener'); return true; },
   'app.setHotkeys': async () => false,
+  // Phones: open apps through their links (Safari may ask "Open in …?").
+  'tool.open_app': async ({ name }) => {
+    const key = String(name || '').toLowerCase().trim().replace(/^the\s+/, '').replace(/\s+app$/, '');
+    const scheme = APP_LINKS[key] || APP_LINKS[key.replace(/\s+/g, '')];
+    if (!scheme) return { ok: false, error: `I can’t open “${name}” from here. Try “Hey Siri, open ${name}”, or ask me to search for it.` };
+    location.href = scheme;
+    return { name: name.replace(/\b\w/g, (c) => c.toUpperCase()), note: 'If nothing happened, the app may not be installed.' };
+  },
+  'system.status': async () => {
+    const ua = navigator.userAgent;
+    const ios = ua.match(/OS (\d+)[_.](\d+)/), android = ua.match(/Android (\d+(?:\.\d+)?)/);
+    const device = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua)) ? 'iPad' : /Android/.test(ua) ? 'Android device' : /Mac/.test(ua) ? 'Mac' : /Win/.test(ua) ? 'Windows PC' : /Linux/.test(ua) ? 'Linux computer' : 'computer';
+    let storage = null, battery = null;
+    try { const e = await navigator.storage.estimate(); storage = { used: e.usage, quota: e.quota }; } catch {}
+    try { if (navigator.getBattery) { const b = await navigator.getBattery(); battery = { level: Math.round(b.level * 100), charging: b.charging }; } } catch {}
+    const c = navigator.connection;
+    return {
+      web: true, device, os: ios && /iPhone|iPad|iPod/.test(ua) ? `iOS ${ios[1]}.${ios[2]}` : android ? `Android ${android[1]}` : '',
+      installed: matchMedia('(display-mode: standalone)').matches || !!navigator.standalone, online: navigator.onLine, network: c?.effectiveType || '',
+      screen: `${screen.width}×${screen.height}`, cores: navigator.hardwareConcurrency || null, memoryGB: navigator.deviceMemory || null,
+      storage, battery, gpu: 'gpu' in navigator,
+    };
+  },
   'app.notify': async ({ title, body }) => {
     chime();
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
@@ -193,6 +216,20 @@ const browser = {
     };
     inp.click();
   }),
+};
+
+const APP_LINKS = {
+  spotify: 'spotify://', whatsapp: 'whatsapp://', youtube: 'youtube://', 'youtube music': 'youtubemusic://', instagram: 'instagram://', tiktok: 'snssdk1233://',
+  snapchat: 'snapchat://', facebook: 'fb://', messenger: 'fb-messenger://', twitter: 'twitter://', x: 'twitter://', threads: 'barcelona://', telegram: 'tg://',
+  discord: 'discord://', netflix: 'nflx://', 'disney+': 'disneyplus://', 'disney plus': 'disneyplus://', 'prime video': 'aiv://', roblox: 'roblox://', minecraft: 'minecraft://',
+  gmail: 'googlegmail://', 'google maps': 'comgooglemaps://', chrome: 'googlechrome://', google: 'google://', uber: 'uber://', waze: 'waze://', zoom: 'zoomus://',
+  teams: 'msteams://', outlook: 'ms-outlook://', duolingo: 'duolingo://', pinterest: 'pinterest://', reddit: 'reddit://', twitch: 'twitch://', notion: 'notion://',
+  slack: 'slack://', amazon: 'com.amazon.mobile.shopping://', 'google photos': 'googlephotos://', 'google drive': 'googledrive://', shazam: 'shazam://',
+  maps: 'maps://', 'apple maps': 'maps://', music: 'music://', 'apple music': 'music://', messages: 'sms:', imessage: 'sms:', phone: 'tel:', facetime: 'facetime://',
+  mail: 'message://', email: 'message://', calendar: 'calshow://', photos: 'photos-redirect://', notes: 'mobilenotes://', reminders: 'x-apple-reminderkit://',
+  'app store': 'itms-apps://', appstore: 'itms-apps://', podcasts: 'podcasts://', 'apple tv': 'videos://', tv: 'videos://', books: 'ibooks://', shortcuts: 'shortcuts://',
+  weather: 'weather://', clock: 'clock-alarm://', alarm: 'clock-alarm://', news: 'applenews://', wallet: 'shoebox://', health: 'x-apple-health://', files: 'shareddocuments://',
+  fitness: 'fitnessapp://', 'find my': 'findmy://', safari: 'x-web-search://', settings: 'App-prefs:', home: 'com.apple.home://', translate: 'translate://', voice: 'voicememos://', 'voice memos': 'voicememos://',
 };
 
 let audioCtx = null;
