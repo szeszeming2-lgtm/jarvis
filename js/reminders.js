@@ -40,6 +40,7 @@ function fire(r, missed = false) {
   const title = `${settings.assistantName} reminder`;
   call('app.notify', { title, body: r.text, sound: true }).catch(() => browserNotify(title, r.text));
   if (r.textMe && can('messages')) call('messages.send', { to: 'me', text: `Reminder: ${r.text}` }).catch(() => {});
+  if (r.callMe && can('messages')) import('./tools.js').then(({ callText }) => call('messages.send', { to: 'me', text: callText(r.text) })).catch(() => {});
 }
 
 function browserNotify(title, body) {
@@ -47,7 +48,7 @@ function browserNotify(title, body) {
 }
 
 /** Create a reminder. when = phrase ("in 10 minutes", "at 5pm") or a Date/ms. */
-export async function add(text, when, { textMe = false } = {}) {
+export async function add(text, when, { textMe = false, callMe = false } = {}) {
   text = String(text || '').trim().replace(/^(to|that)\s+/i, '');
   if (!text) throw new Error('What should I remind you about?');
   let due;
@@ -59,7 +60,7 @@ export async function add(text, when, { textMe = false } = {}) {
     due = p.date.getTime();
   }
   if (due < Date.now() - 60000) throw new Error('That time has already passed.');
-  const r = { id: uid('r'), text, due, created: Date.now(), done: false, textMe: !!textMe };
+  const r = { id: uid('r'), text, due, created: Date.now(), done: false, textMe: !!textMe, callMe: !!callMe };
   // Desktop app: also put it in the system Reminders app (syncs to your phone).
   if (can('reminders') && settings.reminders?.system !== false) {
     try { const s = await call('reminders.add', { text, due }); r.systemId = s?.id; } catch (e) { r.systemError = e.message; }

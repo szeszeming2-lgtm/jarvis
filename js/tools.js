@@ -153,9 +153,15 @@ export const TOOLS = [
       text: { type: 'string', description: 'What to remind them about, e.g. "call the dentist"' },
       when: { type: 'string', description: 'When, in plain words exactly as the user said it: "in 20 minutes", "at 5:30 pm", "tomorrow at 9am", "friday at 3pm"' },
       text_me: { type: 'boolean', description: 'Also send the user a text message when it is due (only if they ask to be texted)' },
+      call_me: { type: 'boolean', description: 'Call the user when it is due (only if they ask to be called or woken up)' },
     }, ['text', 'when']),
     ask: (a) => ({ title: `Remind you: “${a.text}”`, detail: a.when }),
-    run: async (a) => { const r = await reminders.add(a.text, a.when, { textMe: !!a.text_me }); return { id: r.id, text: r.text, when: r.human, due: new Date(r.due).toISOString(), inSystemReminders: !!r.systemId }; },
+    run: async (a) => {
+      if (a.call_me && !settings.profile?.phone?.trim()) throw new Error('Tell me your number first, so I know where to call: say “my number is +1 555 123 4567”.');
+      const r = await reminders.add(a.text, a.when, { textMe: !!a.text_me, callMe: !!a.call_me });
+      const callNote = a.call_me && !can('messages') ? 'Calls come from the JARVIS Mac app, so keep it running on your Mac. The reminder is here as well.' : '';
+      return { id: r.id, text: r.text, when: r.human, due: new Date(r.due).toISOString(), inSystemReminders: !!r.systemId, callNote };
+    },
     done: (r) => `Reminder ${r.when}` },
   { name: 'list_reminders', icon: 'bell', group: 'reminders',
     ...s('List the user\'s upcoming reminders.'),
@@ -168,7 +174,26 @@ export const TOOLS = [
     ask: (a, p) => ({ title: `Cancel ${p.matches.length} reminder${p.matches.length === 1 ? '' : 's'}`, preview: p.matches.map((r) => `• ${r.text} — ${describeWhen(new Date(r.due))}`).join('\n') }),
     run: async (a, p) => { for (const r of p.matches) await reminders.cancel(r.id); return { cancelled: p.matches.length }; },
     done: (r) => `Cancelled ${r.cancelled}` },
-  { name: 'send_text', category: 'messages', icon: 'message', group: 'contact', alwaysAsk: true,
+  { name: 'call_me', icon: 'phone', group: 'contact',
+    ...s('Call the user now: their iPhone gets a "JARVIS is calling" message, and tapping it opens a call where you speak to them. Only when they ask you to call them.', { message: { type: 'string', description: 'What to say when they answer' } }),
+    run: async (a) => {
+      const to = settings.profile?.phone?.trim();
+      if (!to) throw new Error('Tell me your number first: say “my number is +1 555 123 4567”. It stays on this device.');
+      if (!can('messages')) throw new Error('Calls to you come from the JARVIS Mac app (it uses Messages on your Mac). Ask it on your Mac, or keep it running in the menu bar.');
+      const r = await call('messages.send', { to, text: callText(a.message || '') });
+      return { sent: !!r?.sent, drafted: !!r?.drafted };
+    },
+    done: (r) => (r.sent ? 'Calling you' : 'Call link ready to send') },
+  { name: 'set_my_number', icon: 'user', group: 'contact',
+    ...s('Save the user\'s own phone number (or iMessage email) so you can text and call them.', { number: { type: 'string' } }, ['number']),
+    run: async (a) => {
+      const n = String(a.number || '').trim();
+      if (!/^\+?[\d\s().-]{5,20}$/.test(n) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(n)) throw new Error('That number doesn’t look right. Include the country code, like +1 555 123 4567.');
+      set('profile.phone', n);
+      return { number: n };
+    },
+    done: (r) => `Your number: ${r.number}` },
+  { name: 'send_text', category: 'messages', icon: 'message', group: 'contact', alwaysAsk: true, selfOk: (a) => /^(me|myself)$/i.test(String(a.to || '').trim()),
     ...s('Send a text message. "to" is a phone number, an email for iMessage, a contact name (desktop app), or "me" for the user themself.', {
       to: { type: 'string' }, message: { type: 'string' },
     }, ['to', 'message']),
@@ -289,7 +314,8 @@ export async function execute(name, args = {}, ctx = {}) {
   const skip = tool.skipIf?.(args, prepared);
   if (skip) return skip;
 
-  if (level === 'ask' || tool.alwaysAsk) {
+  // Texts and calls to yourself don't need a confirmation card: you asked for them.
+  if ((level === 'ask' || tool.alwaysAsk) && !tool.selfOk?.(args)) {
     const info = tool.ask ? tool.ask(args, prepared) : { title: tool.name };
     const answer = ctx.confirm ? await ctx.confirm({ tool, args, info }) : 'deny';
     if (answer === 'deny') {
@@ -362,7 +388,7 @@ async function resolveRecipient(to, { forCall = false } = {}) {
   if (saved && !/^(me|myself)$/i.test(raw)) return { label: saved.name, address: saved.phone };
   if (/^(me|myself|my phone|self)$/i.test(raw)) {
     const mine = settings.profile?.phone?.trim();
-    if (!mine) throw new Error('Add your phone number (or iMessage email) in Settings → General first, so I know where “me” is.');
+    if (!mine) throw new Error('Tell me your number first: say “my number is +1 555 123 4567” (or add it in Settings → General). It stays on this device.');
     return { label: 'you', address: mine };
   }
   const digits = raw.replace(/[\s().-]/g, '');
@@ -387,4 +413,13 @@ function appStats() {
       workoutsThisWeek: sum.sessions, streak: sum.streak, people: people.all().length, memories: memory.all().length,
     },
   };
+}
+
+// ---------------------------------------------------------------- calls to you
+const CALL_URL = 'https://szeszeming2-lgtm.github.io/jarvis/';
+/** The text that rings your phone: tapping the link opens JARVIS's incoming-call screen. */
+export function callText(message) {
+  const name = settings.assistantName || 'JARVIS';
+  const link = `${CALL_URL}#call=${encodeURIComponent(String(message || '').slice(0, 300))}&from=${encodeURIComponent(name)}`;
+  return `📞 ${name} is calling you${message ? ` about: ${message}` : ''}. Tap to answer: ${link}`;
 }

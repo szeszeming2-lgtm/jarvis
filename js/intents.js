@@ -77,8 +77,20 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((r = t.match(/^(?:my (?:home )?(?:city|town) is|i live in|set my (?:home )?city to) (.+)$/i))) return { tool: 'set_home_city', args: { place: r[1] } };
   if ((r = low.match(/^(?:what(?:'s| is) the |how(?:'s| is) the |show me the |get the )?(?:weather|forecast|temperature)(?: like)?(?: (?:today|now|outside|tomorrow|this week))?(?: (?:in|for|at) (.+?))?(?: (?:today|now|tomorrow))?$|^(?:is it|will it) (?:going to )?(?:rain|snow|be (?:hot|cold|sunny|windy))(?: today| tomorrow)?(?: in (.+?))?$|^do i need an umbrella(?: today| tomorrow)?(?: in (.+?))?$|^how (?:hot|cold|warm) is it(?: outside)?(?: in (.+?))?$/))) return { tool: 'get_weather', args: { place: (r[1] || r[2] || r[3] || r[4] || '').trim() } };
 
+  // Your own number, so JARVIS can text and call you.
+  if ((r = t.match(/^(?:my (?:phone |cell |mobile |iphone )?number is|my phone is|save my (?:phone )?number(?: as)?|set my (?:phone )?number(?: to)?|text me at|call me at)\s*(\+?\d[\d\s().-]{4,}|[^\s@]+@[^\s@]+\.[^\s@]+)$/i))) return { tool: 'set_my_number', args: { number: r[1].trim() } };
+  // JARVIS calls you: "call me now", "call me in 10 minutes about the bank", "call me at 7am to wake me up", "wake me up at 7"
+  const CALL = '(?:call me|give me a call|ring me|phone me)';
+  const callRe1 = new RegExp(`^${CALL} ${TIME}(?: (?:to|about|and say|and tell me|and remind me(?: to)?) (.+))?$`, 'i');
+  const callRe2 = new RegExp(`^${CALL} (?:to|about|and remind me(?: to)?) (.+?) ${TIME}$`, 'i');
+  const wakeRe = new RegExp(`^wake me(?: up)? ${TIME}$`, 'i');
+  if ((r = t.match(callRe1)) && parseWhen(r[1])) return { tool: 'set_reminder', args: { text: r[2] || 'your call from JARVIS', when: r[1], call_me: true } };
+  if ((r = t.match(callRe2)) && parseWhen(r[2])) return { tool: 'set_reminder', args: { text: r[1], when: r[2], call_me: true } };
+  if ((r = t.match(wakeRe)) && parseWhen(r[1])) return { tool: 'set_reminder', args: { text: 'Time to wake up', when: r[1], call_me: true } };
+  if ((r = t.match(/^(?:call me|give me a call|ring me|phone me)(?: now| right now| back)?(?: (?:to|about|and say|and tell me) (.+))?$/i))) return { tool: 'call_me', args: { message: r[1] || '' } };
+
   // "call me Alex" means a name, not a phone call.
-  if ((r = t.match(/^(?:call me|my name is|i'?m called) ([\p{L}][\p{L}'’ -]{0,30})$/iu)) && r[1].split(/\s+/).length <= 3) return { local: 'callme', name: r[1].trim() };
+  if ((r = t.match(/^(?:call me|my name is|i'?m called) (?!(?:now|later|back|in|at|tomorrow|tonight|today|when|soon|please|up|about|to)\b)([\p{L}][\p{L}'’ -]{0,30})$/iu)) && r[1].split(/\s+/).length <= 3) return { local: 'callme', name: r[1].trim() };
 
   // Texts: "text Mom saying I'm on my way", "message +1 555 0100: hi", "text me buy milk"
   if ((r = t.match(/^(?:text|message|imessage|send (?:a )?(?:text|message) to) (.+?)(?:\s*:\s*|\s+saying\s+|\s+that says\s+|\s+that\s+)(.+)$/i))) return { tool: 'send_text', args: { to: r[1].replace(/^my /i, ''), message: r[2] } };
@@ -203,7 +215,10 @@ export function reply(intent, res, name = 'JARVIS') {
       return `I found ${r.count} file${r.count === 1 ? '' : 's'}${r.count > 8 ? ' (showing 8)' : ''}:\n\n${list}`;
     }
     case 'system_status': return statusText(r);
-    case 'set_reminder': return `I’ll remind you ${r.when}${intent.args.text_me ? ' and send you a text' : ''}: **${r.text}**.${r.inSystemReminders ? ' It’s in your Reminders app too, so your phone will remind you as well.' : ''}`;
+    case 'call_me': return r.sent ? `Calling you now, check your iPhone. 📞` : `Messages opened with the call link ready. Press Send to ring your iPhone.`;
+    case 'set_my_number': return `Got it. I’ll text and call you at **${r.number}**. It’s saved only on this device. Try “text me hello” or “call me in 1 minute”.`;
+    case 'set_reminder': if (intent.args.call_me) return `I’ll call you ${r.when}: **${r.text}**.${r.callNote ? ' ' + r.callNote : ''}`;
+      return `I’ll remind you ${r.when}${intent.args.text_me ? ' and send you a text' : ''}: **${r.text}**.${r.inSystemReminders ? ' It’s in your Reminders app too, so your phone will remind you as well.' : ''}`;
     case 'list_reminders': return r.count ? `You have ${r.count} upcoming reminder${r.count === 1 ? '' : 's'}:\n\n${r.reminders.map((x) => `- **${x.text}** — ${x.when}`).join('\n')}` : 'You have no upcoming reminders.';
     case 'cancel_reminder': return `Cancelled ${r.cancelled} reminder${r.cancelled === 1 ? '' : 's'}.`;
     case 'send_text': return r.sent ? `Message sent to ${r.to}.` : `Your messages app is open with the text to ${r.to}. Press Send when you’re ready.`;

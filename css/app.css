@@ -453,6 +453,27 @@ input[type="color"] { width: 38px; height: 30px; border: 1px solid var(--line); 
 .model-opt.on { border-color: var(--accent); box-shadow: 0 0 16px rgba(var(--accent-rgb), .25); }
 .model-opt:hover { border-color: var(--line-strong); }
 
+/* Incoming call from JARVIS */
+.call-screen { position: fixed; inset: 0; z-index: 95; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: max(24px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom)); text-align: center; background: radial-gradient(700px 500px at 50% 30%, rgba(var(--accent2-rgb), .3), transparent 65%), var(--bg0); animation: fade .3s both; }
+.call-orb { position: relative; width: 150px; height: 150px; margin-bottom: 18px; border-radius: 50%; background: radial-gradient(circle, #fff 0 8%, var(--accent) 9% 22%, rgba(var(--accent-rgb), .15) 23% 60%, transparent 61%); box-shadow: 0 0 60px rgba(var(--accent-rgb), .6); }
+.call-orb span { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(var(--accent-rgb), .7); animation: callRing 2s ease-out infinite; }
+.call-orb span:nth-child(2) { animation-delay: .66s; } .call-orb span:nth-child(3) { animation-delay: 1.33s; }
+@keyframes callRing { from { transform: scale(1); opacity: .9; } to { transform: scale(1.9); opacity: 0; } }
+.call-screen.live .call-orb span { animation-duration: 3s; }
+.call-name { font-size: 34px; font-weight: 300; letter-spacing: .12em; }
+.call-status { color: var(--accent); letter-spacing: .2em; text-transform: uppercase; font-size: 13px; font-family: var(--mono); }
+.call-topic { max-width: 420px; color: var(--text); font-size: 18px; line-height: 1.4; margin-top: 6px; }
+.call-said { max-width: 440px; color: var(--text-dim); font-size: 15px; line-height: 1.5; min-height: 22px; }
+.call-buttons { display: flex; gap: 70px; margin-top: auto; padding-top: 30px; }
+.call-btn { width: 76px; height: 76px; border-radius: 50%; border: 0; color: #fff; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+.call-btn svg { width: 32px; height: 32px; }
+.call-btn span { position: absolute; top: calc(100% + 10px); font-size: 13px; color: var(--text-dim); white-space: nowrap; }
+.call-btn.accept { background: #22c55e; box-shadow: 0 0 30px rgba(34, 197, 94, .6); animation: blink 1.2s ease-in-out infinite; }
+.call-btn.decline { background: #ef4444; box-shadow: 0 0 30px rgba(239, 68, 68, .5); }
+.call-btn.decline svg { transform: rotate(135deg); }
+.call-screen.live .call-btn.decline svg { transform: rotate(135deg); }
+.call-note { margin-top: 36px; font-size: 11.5px; color: var(--text-faint); }
+
 /* Workout coach */
 .coach { position: fixed; inset: 0; z-index: 88; background: radial-gradient(900px 600px at 50% 20%, rgba(var(--accent2-rgb), .18), transparent 60%), var(--bg0); display: flex; flex-direction: column; gap: 10px; padding: max(10px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); animation: fade .25s both; }
 .coach-top { display: flex; align-items: center; gap: 8px; color: var(--accent); font-size: 12px; }

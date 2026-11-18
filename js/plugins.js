@@ -15,7 +15,7 @@ export const PLUGINS = [
   { id: 'reminders', name: 'Reminders', icon: 'bell', groups: ['reminders'], tryText: 'remind me in 1 hour to drink water', desc: 'Reminders by voice or text, with Add to Calendar so your phone alerts you.' },
   { id: 'lists', name: 'Lists & Notes', icon: 'list', groups: ['lists'], tryText: "what's on my shopping list", open: 'lists', desc: 'Shopping, to-do, notes and any list you name.' },
   { id: 'weather', name: 'Weather', icon: 'sun', groups: ['weather'], tryText: "what's the weather", desc: 'Today and tomorrow for your city (free Open-Meteo service).' },
-  { id: 'contact', name: 'Texts & Calls', icon: 'message', groups: ['contact'], tryText: '', open: 'lists', desc: 'Text or call the people you save: “text Mom I’m on my way”.' },
+  { id: 'contact', name: 'Texts & Calls', icon: 'message', groups: ['contact'], tryText: '', open: 'lists', desc: 'Text or call people you save, and JARVIS can text and call you: “call me at 7am to wake me up”, “text me buy milk”.' },
   { id: 'apps', name: 'Open Apps', icon: 'app', groups: ['apps'], tryText: 'open Spotify', desc: 'Opens your apps: Spotify, WhatsApp, YouTube, Maps, Notes and more.', needs: () => isNative || mobile() },
   { id: 'converter', name: 'Unit Converter', icon: 'calculator', groups: ['convert'], tryText: 'convert 5 miles to km', desc: 'Lengths, weights, cooking, temperatures, speed, data.' },
   { id: 'timers', name: 'Timers & Maths', icon: 'clock', groups: ['basics'], tryText: 'set a timer for 5 minutes', desc: 'Countdowns, quick maths and tips: “what is 18% of 64”.' },

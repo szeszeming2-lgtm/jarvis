@@ -16,6 +16,7 @@ import './ui/workout.js';
 import './ui/plugins.js';
 import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
+import { checkForCall } from './ui/call.js';
 import * as look from './ui/look.js';
 import * as assistant from './assistant.js';
 import * as voice from './voice.js';
@@ -90,8 +91,11 @@ async function boot() {
   bus.on('settings', (d) => { if (d.path.startsWith('ai.')) updateModelChip(); if (d.path === 'voice.speak') updateSpeakToggle(); });
   setInterval(() => { if (ollama.engine.status !== 'online' && !document.hidden) ollama.detect(); }, 15000);
 
-  if (!settings.setupDone) openWizard();
+  // Opened from a "📞 JARVIS is calling" link: show the call first.
+  if (checkForCall()) { /* the call screen is up; setup can wait */ }
+  else if (!settings.setupDone) openWizard();
   else syncWake();
+  addEventListener('hashchange', checkForCall);
   app.ready = true;
   bus.emit('ready');
   // Web version: cache the interface so it opens offline (never inside the desktop app).
