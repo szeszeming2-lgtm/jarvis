@@ -6,8 +6,9 @@ import { section, toast, callout, dialog, toggle, row, rows } from './common.js'
 import { call, can, isNative } from '../host.js';
 import * as sync from '../sync.js';
 
-const phone = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-const deviceName = () => (isNative ? 'Mac' : /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android phone' : 'browser');
+const iPadOS = () => navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent);
+const phone = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || iPadOS();
+const deviceName = () => (isNative ? 'Mac' : /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) || iPadOS() ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android phone' : 'browser');
 
 registerTab('sync', (body) => {
   let chats = true;

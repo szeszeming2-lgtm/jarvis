@@ -8,7 +8,7 @@ import * as reminders from './reminders.js';
 import * as workout from './workout.js';
 import * as ollama from './ollama.js';
 
-const mobile = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+const mobile = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
 
 export const PLUGINS = [
   { id: 'workout', name: 'Workout Coach', icon: 'zap', groups: ['fitness'], tryText: 'track my squats', open: 'workout', desc: 'The camera counts your squats, push-ups, jumping jacks, curls and plank time. Keeps a workout log and streak.' },

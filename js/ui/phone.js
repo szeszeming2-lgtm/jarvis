@@ -5,7 +5,8 @@ import * as ollama from '../ollama.js';
 import * as phone from '../webllm.js';
 import { toast, dialog } from './common.js';
 
-export const isMobile = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent) && innerWidth < 1100);
+// iPads say "Macintosh" but have a touch screen (Macs have none), whatever their size or rotation.
+export const isMobile = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
 export const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
 
 let busyKey = '';

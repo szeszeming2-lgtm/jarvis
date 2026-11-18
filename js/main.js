@@ -48,8 +48,8 @@ async function boot() {
   document.documentElement.classList.toggle('native', isNative);
   if (hi.titlebar) document.documentElement.style.setProperty('--titlebar', hi.titlebar + 'px');
   await loadSettings();
-  // First run on a phone or tablet: run the AI on the device itself.
-  if (!settings.setupDone && !isNative && isMobile() && settings.ai.provider !== 'phone') { settings.ai.provider = 'phone'; settings.ai.model = ''; }
+  // Phones and tablets can't reach Ollama from this website, so they always run the AI on the device itself.
+  if (!isNative && isMobile() && settings.ai.provider !== 'phone') { settings.ai.provider = 'phone'; settings.ai.model = ''; }
   applyAppearance();
   hydrateIcons();
   await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load(), lists.load(), people.load(), workout.load()]);
