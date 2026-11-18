@@ -9,6 +9,8 @@ import { toast, select, seg, toggle } from './common.js';
 import { THEMES, applyAppearance } from './theme.js';
 import { download, downloads, installEngine } from './models.js';
 import { connectPanel } from './connect.js';
+import { phonePanel, providerChoice } from './phone.js';
+import * as phoneAI from '../webllm.js';
 
 let viz = null;
 
@@ -56,7 +58,7 @@ function welcome(box, { next }) {
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(); } });
   box.append(
     h('h2', {}, 'Hello. I am ', h('b', { text: settings.assistantName }), '.'),
-    h('p', { class: 'lead', text: 'Your free, private AI assistant. I run entirely on this computer: no account, no subscription, no API keys, no ads. Let’s get you set up — it takes about two minutes.' }),
+    h('p', { class: 'lead', text: 'Your free, private AI assistant. I run entirely on your own device: no account, no subscription, no API keys, no ads. Let’s get you set up — it takes about two minutes.' }),
     h('div', { class: 'wiz-body' },
       h('div', { class: 'rows' },
         h('div', { class: 'row' }, h('div', { class: 'row-text' }, h('div', { class: 'row-label', text: 'What should I call you?' })), h('div', { class: 'row-control', style: { flex: 1, maxWidth: '260px' } }, name)),
@@ -68,11 +70,22 @@ function welcome(box, { next }) {
 function engine(box, { next, back, offs, viz }) {
   const list = h('div', { class: 'check-list' });
   const actions = h('div', { class: 'flex', style: { marginTop: '12px', justifyContent: 'center' } });
-  let ram = 8, hosted = false, panel = null;
+  let ram = 8, hosted = false, panel = null, ppanel = null;
+  const chooser = h('div');
+  const drawChooser = () => { if (!isNative) chooser.replaceChildren(providerChoice(() => { drawChooser(); draw(); })); };
+  drawChooser();
   const check = (state, title, sub) => h('div', { class: 'check ' + state }, h('span', { class: 'st' }, state === 'ok' ? iconNode('check') : state === 'bad' ? iconNode('x') : null), h('div', { class: 'grow' }, title, sub ? h('small', { text: sub }) : null));
   const draw = () => {
     const e = ollama.engine;
     viz.setState(e.status === 'online' ? 'idle' : e.status === 'checking' ? 'thinking' : 'error');
+    if (!isNative && ollama.isPhone()) {
+      if (!ppanel) ppanel = phonePanel();
+      if (list.firstChild !== ppanel) list.replaceChildren(ppanel);
+      actions.replaceChildren();
+      viz.setState('idle');
+      return;
+    }
+    ppanel?.dispose?.(); ppanel = null;
     if (!isNative && e.status !== 'online' && e.status !== 'checking' && e.status !== 'unknown' && (hosted || e.status === 'blocked')) {
       if (panel) panel.redraw(); else panel = connectPanel({ compact: false });
       if (list.firstChild !== panel) list.replaceChildren(panel);
@@ -102,18 +115,28 @@ function engine(box, { next, back, offs, viz }) {
   const t = setInterval(() => { if (ollama.engine.status !== 'online') ollama.detect(); }, 4000);
   offs.push(() => clearInterval(t));
   box.append(
-    h('h2', {}, 'Checking the ', h('b', { text: 'AI engine' })),
-    h('p', { class: 'lead', text: 'JARVIS thinks with Ollama, a free open-source app that runs AI models on your own computer. Nothing you type leaves this device.' }),
-    h('div', { class: 'wiz-body' }, list, actions),
+    h('h2', {}, isNative ? 'Checking the ' : 'Where should the ', h('b', { text: isNative ? 'AI engine' : 'AI run' }), isNative ? '' : '?'),
+    h('p', { class: 'lead', text: isNative ? 'JARVIS thinks with Ollama, a free open-source app that runs AI models on your own computer. Nothing you type leaves this device.' : 'Both choices are free and private: nothing you type is sent to anyone.' }),
+    h('div', { class: 'wiz-body' }, chooser, list, actions),
     foot(back, h('button', { class: 'btn btn-primary', type: 'button', onclick: next }, 'Continue', iconNode('chevron-right'))));
   draw();
 }
 
 function model(box, { next, back, offs }) {
   const body = h('div', { class: 'wiz-body' });
-  let ram = 8;
+  let ram = 8, pp = null;
+  offs.push(() => pp?.dispose?.());
   const draw = () => {
     const e = ollama.engine;
+    if (!isNative && ollama.isPhone()) {
+      if (settings.ai.model && e.models.some((m) => m.name === settings.ai.model)) {
+        body.replaceChildren(h('div', { class: 'callout' }, iconNode('check'), h('div', { text: `${phoneAI.info(settings.ai.model)?.name || settings.ai.model} is ready on this device. You can switch models any time in Settings → AI Models.` })));
+      } else {
+        if (!pp) pp = phonePanel({ compact: true });
+        if (body.firstChild !== pp) body.replaceChildren(pp);
+      }
+      return;
+    }
     body.replaceChildren();
     if (e.status !== 'online') {
       body.append(h('div', { class: 'callout warn' }, iconNode('alert'), h('div', { text: 'The AI engine isn’t running, so models can’t be listed or downloaded yet. You can finish setup now and come back in Settings → AI Models. Instant commands (open apps, timers, maths) already work.' })));
@@ -163,9 +186,10 @@ function voiceStep(box, { next, back }) {
     const refreshMic = async () => { try { const p = await call('listen.permission', { locale: settings.voice.locale }); micState.textContent = p.mic === 'granted' ? 'Microphone allowed' : p.mic === 'denied' ? 'Microphone blocked' : 'Not asked yet'; micState.className = 'pill ' + (p.mic === 'granted' ? 'ok' : p.mic === 'denied' ? 'bad' : 'warn'); } catch { micState.textContent = 'Unavailable'; } };
     refreshMic();
     body.append(h('div', { class: 'rows' },
-      h('div', { class: 'row' }, h('div', { class: 'row-text' }, h('div', { class: 'row-label', text: 'Voice' }), h('div', { class: 'row-desc', text: `${list.length} voices on this computer.` })), h('div', { class: 'row-control flex' }, pick, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { voice.stopSpeaking(); voice.speak(`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}${settings.userName ? ', ' + settings.userName : ''}. All systems are online.`); } }, iconNode('play'), 'Test'))),
+      h('div', { class: 'row' }, h('div', { class: 'row-text' }, h('div', { class: 'row-label', text: 'Voice' }), h('div', { class: 'row-desc', text: `${list.length} voices on this device.` })), h('div', { class: 'row-control flex' }, pick, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { voice.stopSpeaking(); voice.speak(`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}${settings.userName ? ', ' + settings.userName : ''}. All systems are online.`); } }, iconNode('play'), 'Test'))),
       h('div', { class: 'row' }, h('div', { class: 'row-text' }, h('div', { class: 'row-label', text: 'Speak replies' })), h('div', { class: 'row-control' }, seg(settings.voice.speak, [['voice', 'When I talk'], ['always', 'Always'], ['never', 'Never']], (v) => set('voice.speak', v)))),
-      can('voiceIn') ? h('div', { class: 'row' }, h('div', { class: 'row-text' }, h('div', { class: 'row-label', text: 'Microphone' }), h('div', { class: 'row-desc', text: 'Your computer will ask once. You can change it in System Settings → Privacy & Security.' })), h('div', { class: 'row-control flex' }, micState, h('button', { class: 'btn btn-sm', type: 'button', text: 'Allow microphone', onclick: async () => { try { await call('listen.request'); } catch (e) { toast(e.message, { bad: true }); } refreshMic(); } }))) : null,
+      can('voiceIn') ? h('div', { class: 'row' }, h('div', { class: 'row-text' }, h('div', { class: 'row-label', text: 'Microphone' }), h('div', { class: 'row-desc', text: isNative ? 'Your Mac will ask once. You can change it in System Settings → Privacy & Security.' : 'Your browser will ask once.' })), h('div', { class: 'row-control flex' }, micState, h('button', { class: 'btn btn-sm', type: 'button', text: 'Allow microphone', onclick: async () => { try { await call('listen.request'); } catch (e) { toast(e.message, { bad: true }); } refreshMic(); } }))) : null,
+      !isNative && can('voiceIn') ? h('div', { class: 'row' }, h('div', { class: 'row-text' }, h('div', { class: 'row-label', text: 'Talk to JARVIS' }), h('div', { class: 'row-desc', text: 'Uses this browser’s speech recognition. On iPhone that is Apple’s dictation, which may process your voice on Apple’s servers. Leave it off to type only.' })), h('div', { class: 'row-control' }, toggle(!settings.voice.offlineOnly, (v) => set('voice.offlineOnly', !v), 'Voice input'))) : null,
       can('wake') ? h('div', { class: 'row' }, h('div', { class: 'row-text' }, h('div', { class: 'row-label', text: `Wake word “${settings.voice.wakeWord}”` }), h('div', { class: 'row-desc', text: 'Optional. Say it to start talking while JARVIS is open. Off by default.' })), h('div', { class: 'row-control' }, toggle(settings.voice.wake, (v) => set('voice.wake', v), 'Wake word'))) : null));
   })();
 }

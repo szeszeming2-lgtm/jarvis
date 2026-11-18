@@ -7,6 +7,11 @@ import * as sessions from './sessions.js';
 import * as memory from './memory.js';
 import * as skills from './skills.js';
 import * as reminders from './reminders.js';
+import * as lists from './lists.js';
+import * as people from './people.js';
+import { isMobile, isIOS } from './ui/phone.js';
+import { describeWhen } from './when.js';
+import './ui/lists.js';
 import * as look from './ui/look.js';
 import * as assistant from './assistant.js';
 import * as voice from './voice.js';
@@ -21,6 +26,13 @@ import './ui/settings.js';
 import './ui/models.js';
 import './ui/memory-skills.js';
 
+// ?debug shows any script error on screen (handy on phones, which have no console).
+if (/[?&]debug\b/.test(location.search)) {
+  const show = (m) => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:8px;right:8px;top:60px;z-index:999;background:#300;color:#fdd;font:12px monospace;padding:8px;border-radius:8px;white-space:pre-wrap'; d.textContent = m; document.body.append(d); setTimeout(() => d.remove(), 15000); };
+  addEventListener('error', (e) => show('Error: ' + e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
+  addEventListener('unhandledrejection', (e) => show('Promise: ' + (e.reason?.stack || e.reason)));
+  const orig = console.error; console.error = (...a) => { show('console.error: ' + a.map((x) => x?.stack || x).join(' ')); orig(...a); };
+}
 const app = { viz: null, ready: false, engine: ollama.engine, assistant, sessions, settings, voice };
 window.__jarvis = app; // handy for tests and debugging
 
@@ -30,9 +42,11 @@ async function boot() {
   document.documentElement.classList.toggle('native', isNative);
   if (hi.titlebar) document.documentElement.style.setProperty('--titlebar', hi.titlebar + 'px');
   await loadSettings();
+  // First run on a phone or tablet: run the AI on the device itself.
+  if (!settings.setupDone && !isNative && isMobile() && settings.ai.provider !== 'phone') { settings.ai.provider = 'phone'; settings.ai.model = ''; }
   applyAppearance();
   hydrateIcons();
-  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load()]);
+  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load(), lists.load(), people.load()]);
   sessions.create();
 
   app.viz = new Visualizer($('#visualizer'));
@@ -48,6 +62,10 @@ async function boot() {
   bus.on('theme', () => app.viz.readColors());
   bus.on('identity', () => { renderWelcome(); $('#brandName').textContent = settings.assistantName.toUpperCase(); document.title = settings.assistantName; });
   bus.on('home', () => { applyLayout(); renderWelcome(); });
+  for (const ev of ['reminders', 'lists']) bus.on(ev, renderToday);
+  setInterval(renderToday, 60000);
+  wirePhone();
+  if (narrow()) $('#input').placeholder = `Message ${settings.assistantName}`;
   bus.on('session', (s) => { $('#sessionTitle').value = s.title; renderWelcome(); });
   bus.on('session.title', (s) => { if (s === sessions.state.current) $('#sessionTitle').value = s.title; });
   bus.on('wizard.open', openWizard);
@@ -88,32 +106,97 @@ const SUGGESTIONS = [
   ['coffee', 'Morning briefing', '/brief'],
   ['calculator', '18% tip on $64', 'what is 18% of 64'],
 ];
+/** Phones: a small "Today" card under the greeting (next reminders, list counts). */
+function renderToday() {
+  const box = $('#today');
+  if (!box) return;
+  const next = reminders.upcoming().slice(0, 2);
+  const shop = lists.open('shopping').length, todo = lists.open('to-do').length;
+  const chips = [];
+  for (const r of next) chips.push(h('button', { class: 'today-item', type: 'button', onclick: () => openSheet('lists') }, iconNode('bell'), h('span', {}, h('b', { text: r.text }), h('small', { text: describeWhen(new Date(r.due)) }))));
+  if (shop) chips.push(h('button', { class: 'today-item', type: 'button', onclick: () => assistant.send("what's on my shopping list") }, iconNode('list'), h('span', {}, h('b', { text: `Shopping list` }), h('small', { text: `${shop} item${shop === 1 ? '' : 's'}` }))));
+  if (todo) chips.push(h('button', { class: 'today-item', type: 'button', onclick: () => assistant.send("what's on my to-do list") }, iconNode('check'), h('span', {}, h('b', { text: 'To-do' }), h('small', { text: `${todo} left` }))));
+  box.replaceChildren(...chips);
+  box.hidden = !chips.length;
+}
+
+function wirePhone() {
+  // Keep the app exactly the size of the visible screen, so the on-screen keyboard
+  // pushes the message bar up instead of scrolling the conversation out of view.
+  if (window.visualViewport && (isMobile() || navigator.maxTouchPoints > 0)) {
+    const fit = () => {
+      document.documentElement.style.setProperty('--vvh', Math.round(visualViewport.height) + 'px');
+      document.documentElement.classList.toggle('kb-open', visualViewport.height < window.innerHeight * 0.8);
+      if (window.scrollY) window.scrollTo(0, 0);
+      const tr = $('#transcript'); if (tr) tr.scrollTop = tr.scrollHeight;
+    };
+    visualViewport.addEventListener('resize', fit);
+    visualViewport.addEventListener('scroll', () => { if (window.scrollY) window.scrollTo(0, 0); });
+    fit();
+  }
+  // iOS only lets a page speak after a tap, so say "nothing" on the first tap to unlock spoken replies.
+  if (!isNative && 'speechSynthesis' in window) {
+    const unlock = () => { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch {} document.removeEventListener('touchend', unlock); document.removeEventListener('click', unlock); };
+    document.addEventListener('touchend', unlock, { once: true });
+    document.addEventListener('click', unlock, { once: true });
+  }
+  // iPhone/iPad in Safari (not yet on the Home Screen): explain how to install it.
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('jarvis:installHint') === 'no'; } catch {}
+  if (!isNative && isIOS() && !standalone && !dismissed && /^https:/.test(location.protocol)) {
+    const box = $('#installHint');
+    box.replaceChildren(iconNode('download'), h('div', { class: 'grow' }, h('b', { text: 'Add JARVIS to your Home Screen' }), h('span', { text: 'Tap the Share button, then “Add to Home Screen”. It opens full-screen and keeps your AI model and data safe.' })),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close', onclick: () => { box.hidden = true; try { localStorage.setItem('jarvis:installHint', 'no'); } catch {} } }, iconNode('x')));
+    setTimeout(() => (box.hidden = false), 4000);
+  }
+}
+
+const PHONE_SUGGESTIONS = [
+  ['sun', 'Weather', "what's the weather"],
+  ['list', 'Shopping list', "what's on my shopping list"],
+  ['bell', 'Remind me in 1 hour', 'remind me in 1 hour to take a break'],
+  ['coffee', 'Morning briefing', '/brief'],
+  ['sparkles', 'What can you do?', 'What can you do for me? Give me a few examples.'],
+  ['calculator', '18% tip on $64', 'what is 18% of 64'],
+];
 function renderWelcome() {
   const name = settings.userName?.trim();
   const hon = settings.honorific;
   const who = name || (hon === 'sir' || hon === "ma'am" ? hon : '');
+  renderToday();
   $('#greeting').replaceChildren(`${greetingFor()}${who ? ', ' : '.'}`, who ? h('b', { text: who }) : '', who ? '.' : '');
   const st = ollama.engine.status;
-  $('#greetingSub').textContent = st === 'online' && settings.ai.model ? `${settings.assistantName} online. How can I help?` : st === 'checking' || st === 'unknown' ? 'Bringing systems online…' : st === 'blocked' ? 'One quick step left: connect me to Ollama (click “Connect to Ollama” above).' : `${settings.assistantName} is ready for instant commands. Set up the AI engine for full conversations.`;
+  $('#greetingSub').textContent = ollama.isPhone() && st === 'unsupported' ? `${ollama.engine.lastError} Instant commands like reminders, lists and timers still work.`
+    : ollama.isPhone() && !settings.ai.model ? 'Reminders, lists, timers and weather work now. Download the free AI (one time) for full conversations: tap the button at the top.'
+    : st === 'online' && settings.ai.model ? `${settings.assistantName} online. How can I help?` : st === 'checking' || st === 'unknown' ? 'Bringing systems online…' : st === 'blocked' ? 'One quick step left: connect me to Ollama (click “Connect to Ollama” above).' : `${settings.assistantName} is ready for instant commands. Set up the AI engine for full conversations.`;
   const box = $('#suggestions');
   box.replaceChildren();
   if (!settings.home.suggestions) return;
-  for (const [ic, label, text] of SUGGESTIONS) {
+  for (const [ic, label, text] of (isMobile() && !isNative ? PHONE_SUGGESTIONS : SUGGESTIONS)) {
     if (text.startsWith('Give me a system') && !can('status')) continue;
     if (text.startsWith('Organize') && !can('files')) continue;
     box.append(h('button', { class: 'suggestion', type: 'button', onclick: () => assistant.send(text) }, iconNode(ic), label));
   }
 }
 
+const narrow = () => matchMedia('(max-width: 780px)').matches;
+let drawerOpen = false;
 function applyLayout() {
-  $('#app').classList.toggle('no-sidebar', !settings.home.sidebar);
+  // On phones the conversation list is a drawer that starts closed.
+  $('#app').classList.toggle('no-sidebar', narrow() ? !drawerOpen : !settings.home.sidebar);
   $('#app').classList.toggle('no-hud', !settings.home.hud);
   $('#hudToggle').classList.toggle('on', settings.home.hud);
 }
 
 // ------------------------------------------------------------------ top bar
 function wireTopbar() {
-  $('#sidebarToggle').addEventListener('click', () => { set('home.sidebar', !settings.home.sidebar); applyLayout(); });
+  $('#sidebarToggle').addEventListener('click', () => { if (narrow()) drawerOpen = !drawerOpen; else set('home.sidebar', !settings.home.sidebar); applyLayout(); });
+  // Close the drawer after picking a conversation or tapping outside it (phones).
+  $('#sessionList').addEventListener('click', (e) => { if (narrow() && e.target.closest('.session-item') && !e.target.closest('.s-more')) { drawerOpen = false; applyLayout(); } });
+  $('#main').addEventListener('click', (e) => { if (narrow() && drawerOpen && !e.target.closest('#sidebarToggle')) { drawerOpen = false; applyLayout(); } });
+  matchMedia('(max-width: 780px)').addEventListener('change', applyLayout);
+  $('#newChatBtn').addEventListener('click', () => { if (narrow()) { drawerOpen = false; applyLayout(); } });
   $('#hudToggle').addEventListener('click', () => { set('home.hud', !settings.home.hud); applyLayout(); });
   $('#newChatBtn').addEventListener('click', newChat);
   $('#speakToggle').addEventListener('click', () => {
@@ -129,7 +212,7 @@ function wireTopbar() {
   document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => openSheet(b.dataset.open)));
   $('#modelChip').addEventListener('click', () => {
     const e = ollama.engine;
-    if (e.status !== 'online' && !isNative) { openSheet('models'); return; }
+    if ((e.status !== 'online' || ollama.isPhone()) && !isNative) { openSheet('models'); return; }
     const items = [{ header: 'AI model' }];
     for (const m of e.models) items.push({ label: m.name, icon: 'layers', on: m.name === settings.ai.model, sub: (m.details?.parameter_size || ''), action: () => { set('ai.model', m.name); ollama.warm(m.name); toast(`Now using ${m.name}`); } });
     if (!e.models.length) items.push({ label: e.status === 'online' ? 'No models installed' : 'AI engine not running', icon: 'alert' });
@@ -152,8 +235,9 @@ function updateModelChip() {
   const dot = $('#modelDot');
   const txt = $('#modelChipText');
   dot.className = 'dot ' + (e.status === 'online' ? (settings.ai.model ? 'ok' : 'warn') : e.status === 'checking' ? 'busy' : 'bad');
-  if (e.status === 'blocked') dot.className = 'dot warn';
-  txt.textContent = e.status === 'online' ? (settings.ai.model || 'No model installed') : e.status === 'checking' ? 'Checking AI engine…' : e.status === 'not-installed' ? 'AI engine not installed' : e.status === 'blocked' ? 'Connect to Ollama' : 'AI engine offline';
+  if (e.status === 'blocked' || e.status === 'unsupported' || (ollama.isPhone() && e.status === 'online' && !settings.ai.model)) dot.className = 'dot warn';
+  const phoneName = ollama.isPhone() && settings.ai.model ? (e.models.find((m) => m.name === settings.ai.model)?.label || settings.ai.model) : '';
+  txt.textContent = ollama.isPhone() ? (e.status === 'unsupported' ? 'AI not available here' : phoneName || 'Get the free AI') : e.status === 'online' ? (settings.ai.model || 'No model installed') : e.status === 'checking' ? 'Checking AI engine…' : e.status === 'not-installed' ? 'AI engine not installed' : e.status === 'blocked' ? 'Connect to Ollama' : 'AI engine offline';
   if (!assistant.run.busy && !voice.voice.listening && !voice.voice.speaking) setOrb(e.status === 'online' ? 'idle' : 'offline');
   renderWelcome();
 }
@@ -290,7 +374,7 @@ function moveSlash(d) {
 let orbLabel = '';
 function setOrb(state, label) {
   app.viz?.setState(state);
-  const labels = { idle: 'Standing by', listening: 'Listening', thinking: 'Processing', speaking: 'Speaking', offline: 'AI engine offline', error: 'Error' };
+  const labels = { idle: 'Standing by', listening: 'Listening', thinking: 'Processing', speaking: 'Speaking', offline: ollama.isPhone() ? 'Ready for commands' : 'AI engine offline', error: 'Error' };
   orbLabel = label || labels[state] || '';
   if (state === 'idle' && voice.voice.listening && voice.voice.mode === 'wake') orbLabel = `Say “${settings.voice.wakeWord}”`;
   $('#orbStatus').textContent = orbLabel;

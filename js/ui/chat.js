@@ -100,7 +100,7 @@ function build(m) {
       const d = h('details', { class: 'reasoning' }, h('summary', { text: m.pending || !m.content ? 'Reasoning…' : 'Reasoning' }), h('div', { text: m.thinking }));
       body.append(d);
     }
-    if (m.pending && !m.content) body.append(h('div', { class: 'thinking-dots', 'aria-label': 'Thinking' }, h('i'), h('i'), h('i')));
+    if (m.pending && !m.content) body.append(h('div', { class: 'thinking-dots', 'aria-label': 'Thinking' }, h('i'), h('i'), h('i')), m.loading ? h('div', { class: 'muted', style: { fontSize: '12.5px' }, text: m.loading }) : null);
     else {
       const c = h('div');
       c.innerHTML = md(m.content); // markdown.js escapes all model text
@@ -125,7 +125,7 @@ function toolRow(m) {
   const row = h('div', { class: 'actions-row', dataset: { id: m.id } },
     h('span', { class: 'chip ' + cls, title: m.display }, iconNode(ic), h('span', { text: m.display || m.tool_name })));
   if (m.undo) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Undo', onclick: () => assistant.undo(m) }));
-  if (m.reminderId && !isNative) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', title: 'Save it to your phone or computer calendar so it reminds you even when JARVIS is closed', onclick: () => import('../reminders.js').then((r) => r.exportICS(m.reminderId)).catch((e) => toast(e.message, { bad: true })) }, iconNode('download'), 'Add to Calendar'));
+  if (m.reminderId && !isNative) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', title: 'Save it to your phone or computer calendar so it reminds you even when JARVIS is closed', onclick: () => import('../reminders.js').then((r) => r.exportICS(m.reminderId)).catch((e) => toast(e.message, { bad: true })) }, iconNode('download'), /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'Add to iPhone Calendar' : 'Add to Calendar'));
   if (m.reveal) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Show in Finder', onclick: () => call('tool.reveal', { path: m.reveal }).catch((e) => toast(e.message, { bad: true })) }));
   if (m.files?.length) {
     const list = h('div', { style: { width: '100%', display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' } });

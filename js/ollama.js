@@ -2,6 +2,10 @@
 import { call, stream, isNative } from './host.js';
 import { settings } from './store.js';
 import { bus } from './util.js';
+import * as phone from './webllm.js';
+
+/** 'ollama' = Ollama on a computer; 'phone' = a small model running inside this browser (WebLLM). */
+export const isPhone = () => settings.ai.provider === 'phone';
 
 export const engine = {
   status: 'unknown',   // unknown | checking | offline | online | not-installed
@@ -20,7 +24,35 @@ function req(path, method = 'GET', body) {
   return call('ollama.request', { url: url(), path, method, body });
 }
 
+async function detectPhone() {
+  engine.provider = 'phone';
+  const s = await phone.support();
+  engine.version = 'WebLLM';
+  if (!s.ok) { engine.status = 'unsupported'; engine.lastError = s.reason; engine.models = []; bus.emit('engine', engine); return engine; }
+  let keys = [];
+  try { keys = await phone.downloadedKeys(); } catch (e) { engine.lastError = e.message; }
+  engine.models = keys.map((k) => { const i = phone.info(k); const m = { name: k, label: i?.name || k, size: (i?.size || 0) * 1e9, details: { parameter_size: i?.name || '' }, capabilities: ['completion'], phone: true }; engine.caps.set(k, m); return m; });
+  engine.running = phone.state.loadedId ? [{ name: phone.keyOf(phone.state.loadedId) }] : [];
+  engine.status = 'online';
+  if (!settings.ai.model || !keys.includes(settings.ai.model)) { settings.ai.model = keys.includes('Llama-3.2-1B-Instruct') ? 'Llama-3.2-1B-Instruct' : keys[0] || ''; bus.emit('settings', { path: 'ai.model', value: settings.ai.model }); }
+  bus.emit('engine', engine);
+  return engine;
+}
+
+/** Switch where the AI runs, remembering the model chosen for each. */
+export async function switchProvider(p) {
+  if (settings.ai.provider === p) return detect();
+  settings.ai.byProvider = { ...(settings.ai.byProvider || {}), [settings.ai.provider || 'ollama']: settings.ai.model };
+  settings.ai.provider = p;
+  settings.ai.model = settings.ai.byProvider[p] || '';
+  engine.models = []; engine.running = []; engine.status = 'unknown'; engine.lastSpeed = null;
+  bus.emit('settings', { path: 'ai.provider', value: p });
+  return detect();
+}
+
 export async function detect() {
+  if (isPhone()) return detectPhone();
+  engine.provider = 'ollama';
   // Only show "checking" the first time, so periodic re-checks don't flicker the UI.
   if (engine.status === 'unknown') { engine.status = 'checking'; bus.emit('engine', engine); }
   try {
@@ -48,6 +80,7 @@ export async function detect() {
 }
 
 export async function refreshModels() {
+  if (isPhone()) { await detectPhone(); return engine.models; }
   const tags = await req('/api/tags');
   engine.models = (tags.models || []).sort((a, b) => a.size - b.size);
   // Capabilities come with /api/tags on new Ollama versions; ask /api/show otherwise.
@@ -88,6 +121,7 @@ export function recommendInstalled(ramGB = window.__deviceRam || 8) {
 
 /** A model that can look at images: the chosen one, the main model if it can see, or any installed vision model. */
 export function visionModel() {
+  if (isPhone()) return '';
   const can = (n) => n && (engine.caps.get(n)?.capabilities || []).includes('vision');
   if (can(settings.ai.visionModel)) return settings.ai.visionModel;
   if (can(settings.ai.model)) return settings.ai.model;
@@ -98,6 +132,7 @@ export const modelInfo = (name = settings.ai.model) => engine.caps.get(name) || 
 export const hasCap = (cap, name = settings.ai.model) => (modelInfo(name)?.capabilities || []).includes(cap);
 
 export function contextLength(ramGB = window.__deviceRam || 8) {
+  if (isPhone()) return 3072; // phones: shorter prompts answer much faster
   const c = settings.ai.contextLength;
   if (c !== 'auto') return Number(c);
   const max = modelInfo()?.contextMax || 8192;
@@ -110,6 +145,22 @@ export function contextLength(ramGB = window.__deviceRam || 8) {
  * Returns { promise, cancel }.
  */
 export function chat({ model, messages, tools, think, options = {} }, handlers = {}) {
+  if (isPhone()) {
+    const key = model || settings.ai.model;
+    engine.lastRequest = { model: key, tools: [], messages: messages.length, provider: 'phone' };
+    const t0 = performance.now();
+    const s = phone.chat({ key, messages, temperature: Number(settings.ai.temperature), onDelta: handlers.onContent, onLoad: handlers.onLoad });
+    return {
+      cancel: s.cancel,
+      promise: s.promise.then(({ usage } = {}) => {
+        const tps = usage?.extra?.decode_tokens_per_s;
+        if (tps) engine.lastSpeed = tps;
+        engine.running = [{ name: key }];
+        bus.emit('engine', engine);
+        return { final: { eval_count: usage?.completion_tokens || 0, total_duration: (performance.now() - t0) * 1e6 }, toolCalls: [] };
+      }),
+    };
+  }
   const body = {
     model: model || settings.ai.model,
     messages,
@@ -144,6 +195,7 @@ export function chat({ model, messages, tools, think, options = {} }, handlers =
 
 /** Fill in a JSON form reliably (Ollama structured output). */
 export async function extract({ system, user, schema, model = settings.ai.model }) {
+  if (isPhone()) return phone.extract({ key: model, system, user, schema });
   const body = { model, stream: false, format: schema, keep_alive: keepAliveValue(), options: { temperature: 0, num_predict: 200 }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
   if (hasCap('thinking', model)) body.think = false;
   const r = await req('/api/chat', 'POST', body);
@@ -152,6 +204,11 @@ export async function extract({ system, user, schema, model = settings.ai.model 
 
 /** One-shot, non-streaming generation for small jobs (titles). */
 export async function quick(prompt, { maxTokens = 24 } = {}) {
+  if (isPhone()) {
+    let out = '';
+    await phone.chat({ key: settings.ai.model, messages: [{ role: 'system', content: 'Answer briefly.' }, { role: 'user', content: prompt }], temperature: 0.3, maxTokens, onDelta: (d) => (out += d) }).promise;
+    return out.trim();
+  }
   const body = { model: settings.ai.model, stream: false, messages: [{ role: 'user', content: prompt }], keep_alive: keepAliveValue(), options: { temperature: 0.3, num_predict: maxTokens } };
   if (hasCap('thinking')) body.think = false;
   const r = await req('/api/chat', 'POST', body);
@@ -164,6 +221,11 @@ function keepAliveValue() {
 }
 
 export function pull(name, onProgress) {
+  if (isPhone()) {
+    let stop = false;
+    const promise = phone.load(name, (p) => { if (!stop) onProgress?.({ status: p.text, completed: Math.round(p.progress * 1000), total: 1000 }); }).then(() => detectPhone());
+    return { promise, cancel: () => { stop = true; } };
+  }
   return stream(url(), '/api/pull', { model: name, stream: true }, (c) => {
     if (c.error) throw new Error(c.error);
     onProgress?.(c);
@@ -171,13 +233,15 @@ export function pull(name, onProgress) {
 }
 
 export async function refreshRunning() {
+  if (isPhone()) return;
   try { engine.running = (await req('/api/ps')).models || []; bus.emit('engine', engine); } catch {}
 }
 
-export async function remove(name) { await req('/api/delete', 'DELETE', { model: name }); await refreshModels(); }
-export async function unload(name) { await req('/api/chat', 'POST', { model: name, messages: [], keep_alive: 0 }); await refreshModels(); }
+export async function remove(name) { if (isPhone()) { await phone.remove(name); await detectPhone(); return; } await req('/api/delete', 'DELETE', { model: name }); await refreshModels(); }
+export async function unload(name) { if (isPhone()) { await phone.unload(); await detectPhone(); return; } await req('/api/chat', 'POST', { model: name, messages: [], keep_alive: 0 }); await refreshModels(); }
 export async function warm(name = settings.ai.model) {
   if (!name) return;
+  if (isPhone()) { try { await phone.load(name); engine.running = [{ name }]; bus.emit('engine', engine); } catch {} return; }
   try { await req('/api/chat', 'POST', { model: name, messages: [], keep_alive: keepAliveValue() }); } catch {}
   try { engine.running = (await req('/api/ps')).models || []; bus.emit('engine', engine); } catch {}
 }

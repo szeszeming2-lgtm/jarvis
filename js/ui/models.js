@@ -6,19 +6,31 @@ import { row, rows, toggle, select, seg, range, text, section, callout, toast, d
 import * as ollama from '../ollama.js';
 import { call, info, isNative } from '../host.js';
 import { connectPanel } from './connect.js';
+import { phonePanel, providerChoice } from './phone.js';
 
 export const downloads = new Map(); // name -> {pct, status, cancel}
 
 registerTab('models', (body) => {
   const offs = [bus.on('engine', () => draw()), bus.on('downloads', () => drawDownloads())];
-  const top = h('div'), installed = h('div'), dl = h('div'), cat = h('div'), adv = h('div');
-  body.append(top, installed, dl, cat, adv);
+  const where = h('div'), top = h('div'), installed = h('div'), dl = h('div'), cat = h('div'), adv = h('div');
+  body.append(where, top, installed, dl, cat, adv);
+  let phoneBox = null;
   let ram = window.__deviceRam || 8;
   let hosted = false, panel = null;
   info().then((i) => { ram = i.ramGB || ram; hosted = !!i.hosted; draw(); });
 
   function draw() {
     const e = ollama.engine;
+    if (!isNative) where.replaceChildren(section('Where the AI runs', 'Both are free and private. You can switch any time.', providerChoice(() => draw())));
+    if (!isNative && ollama.isPhone()) {
+      if (!phoneBox) phoneBox = phonePanel();
+      top.replaceChildren(section('AI on this device', '', phoneBox));
+      installed.replaceChildren(); dl.replaceChildren(); cat.replaceChildren();
+      adv.replaceChildren(section('Behaviour', '', rows(
+        row('Creativity', 'Lower = more focused and predictable. Higher = more creative.', range(settings.ai.temperature, 0, 1.2, 0.05, (v) => set('ai.temperature', v), (v) => v.toFixed(2), 'Temperature')))));
+      return;
+    }
+    phoneBox?.dispose?.(); phoneBox = null;
     // Engine status
     if (!isNative && e.status !== 'online' && e.status !== 'checking' && e.status !== 'unknown' && (hosted || e.status === 'blocked')) {
       if (panel) panel.redraw(); else panel = connectPanel();
@@ -128,7 +140,7 @@ registerTab('models', (body) => {
   }
 
   draw();
-  return () => offs.forEach((f) => f());
+  return () => { offs.forEach((f) => f()); phoneBox?.dispose?.(); };
 });
 
 const maxSize = (ram) => (ram >= 32 ? '20 GB (27B models)' : ram >= 24 ? '10 GB (14B models)' : ram >= 16 ? '6–8 GB (8B models)' : ram >= 8 ? '3 GB (1–4B models)' : '1 GB (tiny models)');

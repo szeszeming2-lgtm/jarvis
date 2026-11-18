@@ -166,6 +166,13 @@ const browser = {
   },
   'app.setLaunchAtLogin': async () => false,
   'file.save': async ({ name, content, type }) => {
+    // iPhone/iPad: opening a calendar file shows "Add to Calendar" right away.
+    if (type === 'text/calendar' && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)))) {
+      const url = URL.createObjectURL(new Blob([content], { type: 'text/calendar' }));
+      if (!window.open(url, '_blank')) location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return { ok: true };
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([content], { type: type || 'text/plain' }));
     a.download = name; a.click();

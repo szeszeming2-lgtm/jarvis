@@ -2,6 +2,9 @@
 // so they are immediate and work even before any model is installed.
 import { looksLikeMath } from './calc.js';
 import { parseWhen, describeWhen } from './when.js';
+import { summary as weatherSummary } from './weather.js';
+
+const listWords = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]);
 
 const WEBSITES = {
   youtube: 'youtube.com', gmail: 'mail.google.com', google: 'google.com', netflix: 'netflix.com', reddit: 'reddit.com',
@@ -13,7 +16,9 @@ const WEBSITES = {
 const FOLDERS = ['downloads', 'documents', 'desktop', 'pictures', 'photos folder', 'music', 'movies', 'home', 'home folder', 'applications', 'trash'];
 const SETTINGS_PAGES = ['wifi', 'wi-fi', 'bluetooth', 'sound', 'display', 'displays', 'battery', 'privacy', 'notifications', 'keyboard', 'accessibility', 'appearance', 'network', 'storage', 'focus', 'general', 'wallpaper', 'desktop'];
 
-const clean = (t) => t.trim().replace(/^(hey |ok |okay )?(jarvis|computer)[,!. ]+/i, '').replace(/^(please|can you|could you|would you|will you|kindly)\s+/i, '').replace(/[.!?]+$/g, '').replace(/\s+please$/i, '').trim();
+// Phones type curly quotes (what’s); make them plain so every phrase still matches.
+const plainQuotes = (t) => String(t).replace(/[\u2018\u2019\u02BC\u2032]/g, "'").replace(/[\u201C\u201D]/g, '"');
+const clean = (t) => plainQuotes(t).trim().replace(/^(hey |ok |okay )?(jarvis|computer)[,!. ]+/i, '').replace(/^(please|can you|could you|would you|will you|kindly)\s+/i, '').replace(/[.!?]+$/g, '').replace(/\s+please$/i, '').trim();
 
 /** Returns {tool, args} or {local:'stop'|'newchat'} or null. */
 export function match(raw, { customSkills = [] } = {}) {
@@ -49,6 +54,25 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((r = t.match(remindRe5)) && parseWhen(r[1])) return { tool: 'set_reminder', args: { text: r[2], when: r[1], text_me: false } };
   if (/^(what are|show|list|read) (me )?(my )?(upcoming )?reminders$|^(do i have )?any reminders$|^my reminders$/.test(low)) return { tool: 'list_reminders', args: {} };
   if ((r = low.match(/^(?:cancel|delete|remove|clear) (?:my |the )?reminders? (?:about |to |for )?(.+)$/))) return { tool: 'cancel_reminder', args: { about: r[1] } };
+
+  // Lists: "add eggs and milk to my shopping list", "I need to buy bread", "what's on my to-do list"
+  if ((r = t.match(/^(?:add|put) (.+?) (?:to|on|onto) (?:my |the |our )?(.+?) list$/i))) return { tool: 'add_to_list', args: { list: r[2], items: splitList(r[1]) } };
+  if ((r = t.match(/^(?:i need to buy|i have to buy|we need to buy|buy|we need|we'?re out of|we are out of|i'?m out of) (.+?)(?: (?:from|at) the (?:store|shop|supermarket))?$/i)) && !/^(a |an )?(ticket|flight|house|car|time)\b/i.test(r[1])) return { tool: 'add_to_list', args: { list: 'shopping', items: splitList(r[1]) } };
+  if ((r = t.match(/^(?:add|put) (.+?) (?:to|on) (?:my |the )?(?:shopping|grocery|groceries)(?: list)?$/i))) return { tool: 'add_to_list', args: { list: 'shopping', items: splitList(r[1]) } };
+  if ((r = t.match(/^(?:what'?s|what is|show(?: me)?|read(?: me)?|open|check)(?: on)? (?:my |the |our )?(.+?) list$/i))) return { tool: 'show_list', args: { list: r[1] } };
+  if ((r = t.match(/^(?:what do i need to buy|what do we need|what'?s on the shopping list)$/i))) return { tool: 'show_list', args: { list: 'shopping' } };
+  if ((r = t.match(/^(?:what do i (?:have|need) to do(?: today)?|my to-?do'?s?)$/i))) return { tool: 'show_list', args: { list: 'to-do' } };
+  if ((r = t.match(/^(?:remove|delete|cross off|tick off|check off|i bought|i got|got|bought) (.+?) (?:from|off) (?:my |the |our )?(.+?) list$/i))) return { tool: 'remove_from_list', args: { list: r[2], items: splitList(r[1]) } };
+  if ((r = t.match(/^(?:clear|empty|delete) (?:my |the |our )?(.+?) list$/i))) return { tool: 'clear_list', args: { list: r[1] } };
+  if ((r = t.match(/^(?:add )?(?:to-?do|task):? (.+)$/i))) return { tool: 'add_to_list', args: { list: 'to-do', items: [r[1]] } };
+  if ((r = t.match(/^(?:note|take a note|make a note|jot down|write down)(?: that|:)? (.+)$/i))) return { tool: 'add_to_list', args: { list: 'notes', items: [r[1]] } };
+
+  // People: "save Mom's number as +1 555 0100", "Sam's number is 07700 900123"
+  if ((r = t.match(/^(?:save|remember|add|store) (.+?)['’]s? (?:number|phone|cell|mobile)(?: number)?(?: as| is|:)? (\+?[\d][\d\s().-]{4,})$/i)) || (r = t.match(/^(.+?)['’]s (?:number|phone|cell|mobile)(?: number)? is (\+?[\d][\d\s().-]{4,})$/i))) return { tool: 'save_contact', args: { name: r[1].replace(/^my /i, ''), number: r[2].trim() } };
+
+  // Weather
+  if ((r = t.match(/^(?:my (?:home )?(?:city|town) is|i live in|set my (?:home )?city to) (.+)$/i))) return { tool: 'set_home_city', args: { place: r[1] } };
+  if ((r = low.match(/^(?:what(?:'s| is) the |how(?:'s| is) the |show me the |get the )?(?:weather|forecast|temperature)(?: like)?(?: (?:today|now|outside|tomorrow|this week))?(?: (?:in|for|at) (.+?))?(?: (?:today|now|tomorrow))?$|^(?:is it|will it) (?:going to )?(?:rain|snow|be (?:hot|cold|sunny|windy))(?: today| tomorrow)?(?: in (.+?))?$|^do i need an umbrella(?: today| tomorrow)?(?: in (.+?))?$|^how (?:hot|cold|warm) is it(?: outside)?(?: in (.+?))?$/))) return { tool: 'get_weather', args: { place: (r[1] || r[2] || r[3] || r[4] || '').trim() } };
 
   // "call me Alex" means a name, not a phone call.
   if ((r = t.match(/^(?:call me|my name is|i'?m called) ([\p{L}][\p{L}'’ -]{0,30})$/iu)) && r[1].split(/\s+/).length <= 3) return { local: 'callme', name: r[1].trim() };
@@ -164,8 +188,19 @@ export function reply(intent, res, name = 'JARVIS') {
     case 'cancel_reminder': return `Cancelled ${r.cancelled} reminder${r.cancelled === 1 ? '' : 's'}.`;
     case 'send_text': return r.sent ? `Message sent to ${r.to}.` : `Your messages app is open with the text to ${r.to}. Press Send when you’re ready.`;
     case 'make_call': return `Calling ${r.to}.`;
+    case 'add_to_list': return r.added.length ? `Added ${listWords(r.added)} to your ${r.list} list. ${r.count} item${r.count === 1 ? '' : 's'} on it now.` : `That’s already on your ${r.list} list.`;
+    case 'show_list': return r.items.length ? `Your ${r.list} list:\n\n${r.items.map((i) => '- ' + i).join('\n')}` : `Your ${r.list} list is empty.${r.lists?.length > 1 ? ` Your lists: ${r.lists.join(', ')}.` : ''}`;
+    case 'remove_from_list': return r.removed.length ? `Ticked off ${listWords(r.removed)}. ${r.count} left on your ${r.list} list.` : `I couldn’t find that on your ${r.list} list.`;
+    case 'clear_list': return `Your ${r.list} list is empty now.`;
+    case 'save_contact': return `Saved ${r.name}: ${r.number}. You can now say “text ${r.name} …” or “call ${r.name}”.`;
+    case 'get_weather': return weatherSummary(r);
+    case 'set_home_city': return `Got it — your home city is ${r.name}. Ask “what’s the weather?” any time.`;
     default: return 'Done.';
   }
+}
+
+function splitList(text) {
+  return String(text || '').split(/\s*(?:,|;|\band\b|&)\s*/i).map((s) => s.trim().replace(/^(some|a|an|the|more)\s+/i, '').replace(/[.!?]+$/, '')).filter(Boolean);
 }
 
 export function statusText(r) {

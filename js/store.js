@@ -42,6 +42,8 @@ export const DEFAULTS = {
   smartTitles: false,
   launchAtLogin: false,
   ai: {
+    provider: 'ollama',        // ollama (a computer) | phone (in this browser, WebLLM)
+    byProvider: {},
     url: 'http://127.0.0.1:11434',
     model: '',
     temperature: 0.7,
@@ -68,7 +70,8 @@ export const DEFAULTS = {
   },
   memory: { enabled: true, allowSave: true },
   skills: { disabledGroups: [] },
-  profile: { phone: '' },          // only stored on this device; used for "text me"
+  profile: { phone: '' },
+  weather: { place: '', lat: null, lon: null, units: 'auto' },          // only stored on this device; used for "text me"
   reminders: { system: true },      // desktop app: also add to the Reminders app
   permissions: {
     apps: 'allow', web: 'allow', findFiles: 'allow', readFiles: 'ask', writeFiles: 'ask',

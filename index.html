@@ -6,7 +6,7 @@
   <title>JARVIS</title>
   <meta name="description" content="JARVIS: a free, private AI assistant that runs on your own computer.">
   <meta name="color-scheme" content="dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#040a17">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -44,6 +44,7 @@
       </label>
       <nav class="session-list" id="sessionList" aria-label="Conversation history"></nav>
       <div class="side-nav">
+        <button class="nav-btn" type="button" data-open="lists" data-icon="list">Lists</button>
         <button class="nav-btn" type="button" data-open="models" data-icon="layers">Models</button>
         <button class="nav-btn" type="button" data-open="memory" data-icon="brain">Memory</button>
         <button class="nav-btn" type="button" data-open="skills" data-icon="puzzle">Skills</button>
@@ -78,6 +79,7 @@
           <h1 class="greeting" id="greeting">Good evening.</h1>
           <p class="greeting-sub" id="greetingSub">How can I help you today?</p>
           <div class="suggestions" id="suggestions"></div>
+          <div class="today" id="today"></div>
         </div>
       </section>
 
@@ -103,6 +105,7 @@
 
   <div class="sheet-layer" id="sheetLayer" hidden></div>
   <div class="wizard-layer" id="wizardLayer" hidden></div>
+  <div class="install-hint glass" id="installHint" hidden></div>
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <div class="popover glass" id="popover" hidden></div>
 </body>

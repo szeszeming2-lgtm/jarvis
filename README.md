@@ -4,7 +4,16 @@
 
 JARVIS is a free, private AI assistant. The AI runs on your own computer with [Ollama](https://ollama.com), so there are no accounts, no subscriptions, no API keys and no ads. Conversations, memories and settings stay in your browser on your computer.
 
-## Get started
+## On your phone (iPhone or Android)
+
+1. Open the link above in Safari (iPhone) or Chrome (Android).
+2. Tap Share → **Add to Home Screen**. It opens full-screen like an app and keeps your data safe.
+3. In setup, choose **On this device** and download a free AI model once (about 0.3–1 GB, Wi-Fi recommended). After that it works offline, with no account and nothing sent anywhere.
+   This needs iOS 26 or newer, or a recent Android phone with Chrome.
+
+Even without the AI download, the phone version does reminders (with **Add to iPhone Calendar**), shopping and to-do lists, notes, texts and calls to saved people, timers, weather, and maths.
+
+## On a computer
 
 1. Install [Ollama](https://ollama.com/download) (free) and open it.
 2. Open the link above. The setup wizard shows one command to copy and paste so Ollama lets this website talk to it. You only do this once.

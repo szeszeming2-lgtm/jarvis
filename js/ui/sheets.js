@@ -5,6 +5,7 @@ const TABS = [
   ['general', 'General', 'user'],
   ['models', 'AI Models', 'layers'],
   ['voice', 'Voice', 'mic'],
+  ['lists', 'Lists & People', 'list'],
   ['memory', 'Memory', 'brain'],
   ['skills', 'Skills', 'puzzle'],
   ['appearance', 'Appearance', 'palette'],

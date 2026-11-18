@@ -5,6 +5,9 @@ import { settings, set, logActivity } from './store.js';
 import { calculate } from './calc.js';
 import * as memory from './memory.js';
 import * as reminders from './reminders.js';
+import * as lists from './lists.js';
+import * as people from './people.js';
+import * as weather from './weather.js';
 import { describeWhen } from './when.js';
 import { bus, truncate } from './util.js';
 
@@ -168,6 +171,32 @@ export const TOOLS = [
     ask: () => ({ title: 'Look at what you point to on your screen', detail: 'You choose the spot. Only that area is looked at, on this computer.' }),
     run: async (a) => { bus.emit('look.start', { question: a.question || '', fromAI: true }); return { note: 'The user is now choosing a spot. Their answer will arrive as a new message; do not guess what it is.' }; },
     done: () => 'Look mode started' },
+  { name: 'add_to_list', icon: 'list', group: 'lists',
+    ...s('Add items to one of the user\'s lists (shopping, to-do, notes, or any list name).', { list: { type: 'string' }, items: { type: 'array', items: { type: 'string' } } }, ['list', 'items']),
+    run: async (a) => lists.add(a.list, Array.isArray(a.items) ? a.items : lists.splitItems(a.items)),
+    done: (r) => (r.added.length ? `Added ${r.added.length} to ${r.list}` : `Already on ${r.list}`) },
+  { name: 'show_list', icon: 'list', group: 'lists',
+    ...s('Show what is on one of the user\'s lists.', { list: { type: 'string' } }, ['list']),
+    run: async (a) => { const key = lists.normName(a.list); return { list: key, items: lists.open(key).map((i) => i.text), lists: lists.names() }; },
+    done: (r) => `${lists.title(r.list)}: ${r.items.length} item${r.items.length === 1 ? '' : 's'}` },
+  { name: 'remove_from_list', icon: 'check', group: 'lists',
+    ...s('Tick items off a list (when bought or done).', { list: { type: 'string' }, items: { type: 'array', items: { type: 'string' } } }, ['list', 'items']),
+    run: async (a) => lists.remove(a.list, Array.isArray(a.items) ? a.items : lists.splitItems(a.items)),
+    done: (r) => `Ticked off ${r.removed.length}` },
+  { name: 'clear_list', icon: 'trash', group: 'lists', alwaysAsk: true,
+    ...s('Empty a list completely.', { list: { type: 'string' } }, ['list']),
+    ask: (a) => ({ title: `Empty your ${lists.normName(a.list)} list`, preview: lists.open(a.list).map((i) => '• ' + i.text).join('\n') || 'It’s already empty.' }),
+    run: async (a) => lists.clear(a.list), done: (r) => `Emptied ${r.list}` },
+  { name: 'save_contact', icon: 'user', group: 'contact',
+    ...s('Save a person\'s phone number (or iMessage email) so the user can text or call them by name.', { name: { type: 'string' }, number: { type: 'string' } }, ['name', 'number']),
+    run: async (a) => { const p = people.upsert({ name: a.name, phone: a.number }); return { name: p.name, number: p.phone }; },
+    done: (r) => `Saved ${r.name}` },
+  { name: 'get_weather', category: 'web', icon: 'sun', group: 'web',
+    ...s('Get the current weather and the forecast for today and tomorrow. Leave place empty for the user\'s home city.', { place: { type: 'string' } }),
+    run: async (a) => weather.forecast(a.place), done: (r) => `${r.now.icon} ${r.now.temp}${r.units} in ${r.place.split(',')[0]}` },
+  { name: 'set_home_city', icon: 'home', group: 'web',
+    ...s('Remember the user\'s home city for weather.', { place: { type: 'string' } }, ['place']),
+    run: async (a) => weather.setHome(a.place), done: (r) => `Home city: ${r.name}` },
   { name: 'remember', category: 'memory', icon: 'brain', group: 'memory',
     ...s('Save a short fact about the user to long-term memory, only when they ask you to remember something or share a lasting preference.', { fact: { type: 'string' } }, ['fact']),
     run: async (a) => { const m = await memory.add(a.fact, 'jarvis'); return { saved: m.text }; }, done: (r) => `Remembered: ${truncate(r.saved, 46)}` },
@@ -195,6 +224,7 @@ export const GROUPS = {
   commands: { label: 'Terminal commands', icon: 'terminal' },
   memory: { label: 'Memory', icon: 'brain' },
   reminders: { label: 'Reminders', icon: 'bell' },
+  lists: { label: 'Lists (shopping, to-do, notes)', icon: 'list' },
   contact: { label: 'Texts, calls and screen', icon: 'message' },
 };
 
@@ -307,6 +337,8 @@ function startTimer(minutes, label = '') {
 async function resolveRecipient(to, { forCall = false } = {}) {
   const raw = String(to || '').trim();
   if (!raw) throw new Error('Who should it go to?');
+  const saved = people.find(raw);
+  if (saved && !/^(me|myself)$/i.test(raw)) return { label: saved.name, address: saved.phone };
   if (/^(me|myself|my phone|self)$/i.test(raw)) {
     const mine = settings.profile?.phone?.trim();
     if (!mine) throw new Error('Add your phone number (or iMessage email) in Settings → General first, so I know where “me” is.');
@@ -315,7 +347,7 @@ async function resolveRecipient(to, { forCall = false } = {}) {
   const digits = raw.replace(/[\s().-]/g, '');
   if (/^\+?\d{3,15}$/.test(digits)) return { label: raw, address: digits };
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return { label: raw, address: raw };
-  if (!can('contacts')) throw new Error(`I can’t look up contacts in the web version. Give me ${forCall ? 'the number' : 'the number or iMessage email'} for ${raw}.`);
+  if (!can('contacts')) throw new Error(`I don’t have a number for ${raw} yet. Say “save ${raw.replace(/^my /i, '')}’s number as +1 555 123 4567” once, then try again.`);
   const found = await call('contacts.find', { name: raw });
   const list = (found?.matches || []).filter((m) => (forCall ? m.phones?.length : m.phones?.length || m.emails?.length));
   if (!list.length) throw new Error(`I couldn’t find ${raw} in your contacts.`);
