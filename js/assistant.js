@@ -555,7 +555,7 @@ export function say(userText, reply, { viaVoice = false, images = [] } = {}) {
 async function pictureAnswer(userMsg, speakOn, { consented = false } = {}) {
   const vision = await import('./vision.js');
   if (!consented && !vision.downloaded() && !vision.ready()) {
-    push({ role: 'assistant', content: '', errorKind: 'pictureai', forMsg: userMsg.id,
+    push({ role: 'assistant', content: '', errorKind: 'pictureai', forMsg: userMsg.id, sizeMB: vision.SIZE_MB,
       error: `To answer about pictures${ollama.isPhone() ? ' on your phone' : ' without a big AI model'}, I need the free picture AI (about ${vision.SIZE_MB} MB, downloaded once, best on Wi-Fi). It runs on this device, so your pictures stay private.` });
     return;
   }

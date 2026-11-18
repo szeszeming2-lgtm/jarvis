@@ -158,7 +158,7 @@ function errorCard(m) {
     const pick = ollama.bestVisionPick(window.__deviceRam || 8);
     actions.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: `Get ${pick.label} (free, ${pick.size} GB)`, onclick: () => openSheet('models') }));
   } else if (m.errorKind === 'pictureai') {
-    actions.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Download and answer (180 MB)', onclick: (e) => { e.currentTarget.closest('.notice-card')?.remove(); const s = sessions.state.current; const i = s.messages.indexOf(m); if (i >= 0) s.messages.splice(i, 1); assistant.answerPicture(m.forMsg); } }));
+    actions.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: `Download and answer (${m.sizeMB || 210} MB)`, onclick: (e) => { e.currentTarget.closest('.notice-card')?.remove(); const s = sessions.state.current; const i = s.messages.indexOf(m); if (i >= 0) s.messages.splice(i, 1); assistant.answerPicture(m.forMsg); } }));
     if (!ollama.isPhone()) { const pick = ollama.bestVisionPick(window.__deviceRam || 8); actions.append(h('button', { class: 'btn btn-sm', type: 'button', text: `Or a bigger one: ${pick.label} (${pick.size} GB)`, onclick: () => openSheet('models') })); }
   } else if (m.errorKind === 'nomodel') {
     actions.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Get a free model', onclick: () => openSheet('models') }));

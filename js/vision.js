@@ -1,14 +1,15 @@
 // The on-device picture AI: SmolVLM-256M (Apache-2.0) running in the browser with
 // transformers.js. Used on phones, and on computers without an Ollama vision model.
-// About 180 MB, downloaded once (after the user says yes) and kept in the browser's
+// About 210 MB, downloaded once (after the user says yes) and kept in the browser's
 // cache. Pictures never leave the device.
 import { settings, set } from './store.js';
 
 const LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/dist/transformers.min.js';
 const MODEL = 'HuggingFaceTB/SmolVLM-256M-Instruct';
 // Smallest files that still work on both WebGPU and the plain (WASM) fallback.
-const DTYPE = { embed_tokens: 'quantized', vision_encoder: 'q4', decoder_model_merged: 'q4' };
-export const SIZE_MB = 180;
+// q8 = the *_quantized.onnx file (28 MB instead of 114 MB).
+const DTYPE = { embed_tokens: 'q8', vision_encoder: 'q4', decoder_model_merged: 'q4' };
+export const SIZE_MB = 210; // model files ~182 MB + tokenizer 3.5 MB + WASM engine 27 MB
 export const NAME = 'SmolVLM picture AI';
 
 export const state = { status: 'idle', progress: 0, error: '', device: '' };
@@ -68,7 +69,7 @@ export function load(onProgress = () => {}) {
 
 function friendly(e) {
   const m = String(e?.message || e);
-  if (/quota|QuotaExceeded/i.test(m)) return 'There isn’t enough free space on this device for the picture AI (about 180 MB).';
+  if (/quota|QuotaExceeded/i.test(m)) return `There isn’t enough free space on this device for the picture AI (about ${SIZE_MB} MB).`;
   if (/fetch|network|Failed to load/i.test(m)) return 'The picture AI couldn’t download. Check your internet connection and try again (it’s only needed once).';
   return 'The picture AI couldn’t start on this device: ' + m.slice(0, 160);
 }
@@ -84,7 +85,9 @@ export async function ask(image, question, { onToken = () => {}, maxTokens = 160
   const t = lib;
   const raw = await t.RawImage.fromBlob(b64ToBlob(image));
   const q = String(question || '').trim();
-  const text = !q || /^(what('?s| is) (this|that|it)\??|identify (this|it)|what am i looking at\??)$/i.test(q) ? 'What is this? Describe it in one or two sentences.' : q;
+  // The small model follows a few wordings much better than others (tested): "Transcribe the text." reads every line.
+  const text = !q || /^(what('?s| is) (this|that|it)\??|identify (this|it)|what am i looking at\??)$/i.test(q) ? 'What is this? Describe it in one or two sentences.'
+    : /^(read|transcribe|what does (it|this|that|the [a-z]+) say|what('?s| is) written)/i.test(q) ? 'Transcribe the text.' : q;
   const messages = [{ role: 'user', content: [{ type: 'image' }, { type: 'text', text }] }];
   const prompt = processor.apply_chat_template(messages, { add_generation_prompt: true });
   const inputs = await processor(prompt, [raw], { do_image_splitting: false });

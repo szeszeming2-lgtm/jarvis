@@ -13,7 +13,7 @@ JARVIS is a free, private AI assistant. The AI runs on your own computer with [O
 
 **Workout Coach:** prop your phone up and say “track my squats”. The camera counts 14 moves (squats, push-ups, jumping jacks, curls, lunges, sit-ups and crunches, shoulder press, lateral raises, high knees, glute bridges, burpees, pull-ups, plus plank and wall-sit timers) using Google’s free MediaPipe body tracking, entirely on your phone, and keeps a workout log and streak.
 
-**Circle to Ask:** tap the camera button, take a photo or pick one, draw a circle around anything and ask about it (“what is this?”, “read the text”, “translate this”). On phones a small free picture AI (SmolVLM, about 180 MB, downloaded once after you agree) answers on the phone itself.
+**Circle to Ask:** tap the camera button, take a photo or pick one, draw a circle around anything and ask about it (“what is this?”, “read the text”, “translate this”). On phones a small free picture AI (SmolVLM, about 210 MB, downloaded once after you agree) answers on the phone itself.
 
 **Plugins:** Settings → Plugins has a free plugin store (website shortcuts like YouTube or Wikipedia search, helpers, action combos). Make your own, or paste a plugin a friend shares; you always see what a plugin can do before adding it.
 
