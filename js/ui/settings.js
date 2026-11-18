@@ -274,6 +274,9 @@ registerTab('about', (body) => {
   body.append(
     callout('<b>Free forever.</b> No subscriptions, no paid tiers, no API keys, no ads. JARVIS is open source (MIT licence) and runs AI models with Ollama (MIT) on your own hardware.', { icon: 'heart' }),
     callout('<b>About speed.</b> The AI runs on your computer, so its speed and smarts depend on your device. Small models (1–4B) answer quickly on almost anything; bigger models (8B+) are smarter but need 16 GB of memory or more. You can switch models any time in AI Models.', { icon: 'cpu' }),
+    section('Share JARVIS', 'Free for anyone. Each person’s chats, lists and reminders stay on their own device.', rows(
+      row('Link', '', h('div', { class: 'flex' }, h('span', { class: 'mono selectable', text: 'szeszeming2-lgtm.github.io/jarvis' }),
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => import('./share.js').then((m) => m.shareApp()) }, iconNode('share'), 'Share'))))),
     section('This copy', '', sys),
     section('Help', '', rows(
       row('Something not working?', 'Most problems are fixed by making sure Ollama is running (look for the llama icon in your menu bar) and that a model is installed.', h('button', { class: 'btn btn-sm', type: 'button', text: 'AI Models', onclick: () => import('./sheets.js').then((m) => m.show('models')) })),

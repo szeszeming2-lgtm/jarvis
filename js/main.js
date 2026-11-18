@@ -12,6 +12,7 @@ import * as people from './people.js';
 import { isMobile, isIOS } from './ui/phone.js';
 import { describeWhen } from './when.js';
 import './ui/lists.js';
+import { shareApp } from './ui/share.js';
 import * as look from './ui/look.js';
 import * as assistant from './assistant.js';
 import * as voice from './voice.js';
@@ -199,6 +200,7 @@ function wireTopbar() {
   $('#newChatBtn').addEventListener('click', () => { if (narrow()) { drawerOpen = false; applyLayout(); } });
   $('#hudToggle').addEventListener('click', () => { set('home.hud', !settings.home.hud); applyLayout(); });
   $('#newChatBtn').addEventListener('click', newChat);
+  $('#shareBtn').addEventListener('click', shareApp);
   $('#speakToggle').addEventListener('click', () => {
     if (settings.voice.speak === 'never') set('voice.speak', settings.voice._lastSpeak || 'voice');
     else { set('voice._lastSpeak', settings.voice.speak); set('voice.speak', 'never'); voice.stopSpeaking(); }

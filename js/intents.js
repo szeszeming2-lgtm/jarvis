@@ -38,6 +38,7 @@ export function match(raw, { customSkills = [] } = {}) {
 
   if (/^(stop|cancel|be quiet|quiet|shush|shut up|enough|never ?mind|that'?s enough)$/i.test(low)) return { local: 'stop' };
   if (/^(new (chat|conversation)|start over|clear (the )?chat)$/i.test(low)) return { local: 'newchat' };
+  if (/^(share (jarvis|this app|the app|the link|your link|you|the url)|(send|give) (me )?(the|your) (link|url)|what'?s (the|your) (link|url)|copy (the|your) (link|url))$/i.test(low)) return { local: 'share' };
 
   // Reminders: "remind me to X in 10 minutes", "remind me at 5pm to X", "text me tomorrow at 9 to X"
   const TIME = '(in .+?|at .+?|by .+?|tomorrow(?: (?:at|morning|afternoon|evening|night) ?.*?)?|tonight(?: at .+?)?|this (?:morning|afternoon|evening)(?: at .+?)?|(?:on |next |this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?: at .+?)?|at noon|at midnight)';

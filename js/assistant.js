@@ -70,6 +70,13 @@ export async function send(text, { viaVoice = false, attachment = null, images =
   if (intent?.local === 'stop') { stop(); return; }
   if (intent?.local === 'newchat') { sessions.create(); return; }
   if (intent?.local === 'look') { bus.emit('look.start', { question: text, viaVoice }); return; }
+  if (intent?.local === 'share') {
+    const { shareApp, appUrl } = await import('./ui/share.js');
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    push({ role: 'assistant', content: `Here’s my link: ${appUrl()}\n\nAnyone can use it for free. Their chats stay on their own device.`, instant: true });
+    shareApp();
+    return;
+  }
   if (intent?.local === 'callme') {
     const name = intent.name.replace(/^./, (c) => c.toUpperCase());
     push({ role: 'user', content: text, voice: viaVoice || undefined });
