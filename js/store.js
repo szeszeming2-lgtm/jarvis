@@ -74,6 +74,7 @@ export const DEFAULTS = {
   weather: { place: '', lat: null, lon: null, units: 'auto' },          // only stored on this device; used for "text me"
   reminders: { system: true, textMe: true },      // desktop app: also add to the Reminders app; text you when one is due
   briefing: { on: true, time: '07:30', text: true, speak: true, last: '' },
+  mode: 'assistant', modeLang: 'Spanish',   // AI mode (modes.js) and the translator's target language
   permissions: {
     apps: 'allow', web: 'allow', findFiles: 'allow', readFiles: 'ask', writeFiles: 'ask',
     organize: 'ask', system: 'ask', shortcuts: 'ask', commands: 'off', quitApps: 'ask',

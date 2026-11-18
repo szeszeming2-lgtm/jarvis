@@ -138,6 +138,7 @@ const browser = {
     return true;
   },
   'listen.stop': async () => { voiceState.rec?.stop(); return true; },
+  'listen.finish': async () => { voiceState.rec?.stop(); return true; },
   'tool.open_url': async ({ url }) => {
     const w = window.open(url, '_blank');
     if (!w) throw new Error(`Your browser blocked the new tab. Open it here: ${url}`);
@@ -153,6 +154,8 @@ const browser = {
     return true;
   },
   'app.copy': async ({ text }) => { await navigator.clipboard.writeText(text); return true; },
+  'clipboard.read': async () => ({ text: await navigator.clipboard.readText() }),
+  'clipboard.write': async ({ text }) => { await navigator.clipboard.writeText(text); return true; },
   // Phones: open apps through their links (Safari may ask "Open in …?").
   'tool.open_app': async ({ name }) => {
     const key = String(name || '').toLowerCase().trim().replace(/^the\s+/, '').replace(/\s+app$/, '');
@@ -219,7 +222,9 @@ const browser = {
         const dataUrl = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
         return res({ name: f.name, path: f.name, imageDataUrl: dataUrl });
       }
-      res({ name: f.name, path: f.name, text: await f.text() });
+      // Office files and PDFs are binary: hand over the file itself (documents.js reads it).
+      if (/\.(pdf|docx|xlsx|xlsm|zip)$/i.test(f.name)) return res({ name: f.name, path: f.name, file: f });
+      res({ name: f.name, path: f.name, text: await f.text(), file: f });
     };
     inp.click();
   }),

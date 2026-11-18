@@ -15,6 +15,10 @@ import './ui/lists.js';
 import './ui/workout.js';
 import './ui/plugins.js';
 import './ui/sync.js';
+import './ui/projects.js';
+import './ui/planner.js';
+import * as planner from './planner.js';
+import * as projects from './projects.js';
 import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
 import { checkForCall } from './ui/call.js';
@@ -27,7 +31,7 @@ import { initSidebar, initHud } from './ui/panels.js';
 import { openSheet, closeSheet, isOpen as sheetOpen } from './ui/sheets.js';
 import { openWizard } from './ui/wizard.js';
 import { applyAppearance } from './ui/theme.js';
-import { toast, menu, matches, prettyKey } from './ui/common.js';
+import { toast, menu, matches, prettyKey, dialog } from './ui/common.js';
 import './ui/settings.js';
 import './ui/models.js';
 import './ui/memory-skills.js';
@@ -52,7 +56,7 @@ async function boot() {
   if (!isNative && isMobile() && settings.ai.provider !== 'phone') { settings.ai.provider = 'phone'; settings.ai.model = ''; }
   applyAppearance();
   hydrateIcons();
-  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load(), lists.load(), people.load(), workout.load()]);
+  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load(), lists.load(), people.load(), workout.load(), projects.load(), planner.load()]);
   sessions.create();
 
   app.viz = new Visualizer($('#visualizer'));
@@ -76,6 +80,15 @@ async function boot() {
   bus.on('session.title', (s) => { if (s === sessions.state.current) $('#sessionTitle').value = s.title; });
   bus.on('wizard.open', openWizard);
   bus.on('look.start', (d) => look.start(d));
+  // Mac app: floating orb, always-on-top, clipboard history (memory only) as set last time.
+  if (can('orb')) call('app.setWindowOptions', { orb: !!settings.appearance.orb, onTop: !!settings.appearance.onTop }).catch(() => {});
+  if (can('clipboardHistory') && settings.clipboardHistory) call('clipboard.setHistory', { on: true }).catch(() => {});
+  // Automations: run scheduled commands as if you typed them (actions still follow Permissions).
+  import('./automations.js').then(async (A) => { await A.load(); A.start(async (action, a) => {
+    assistant.announce(`⏰ Automation: **${a.name}**`);
+    await assistant.send(action.text);
+    return { ok: true };
+  }); }).catch(console.error);
   // Morning briefing, once a day after the set time (and on the first open after it).
   import('./briefing.js').then((b) => b.startSchedule(async (brief) => {
     assistant.announce(brief.md, { speak: settings.briefing?.speak !== false });
@@ -233,6 +246,25 @@ function wireTopbar() {
   title.addEventListener('change', () => { const s = sessions.state.current; if (s.messages.length) sessions.rename(s.id, title.value); else { s.title = title.value; s.titled = true; } });
   title.addEventListener('keydown', (e) => { if (e.key === 'Enter') { title.blur(); $('#input').focus(); } });
   document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => openSheet(b.dataset.open)));
+  // AI mode chip: shows the mode, click to change it.
+  const drawMode = async () => {
+    const { MODES, current } = await import('./modes.js');
+    const k = current(), m = MODES[k];
+    $('#modeIcon').replaceChildren(iconNode(m.icon));
+    $('#modeText').textContent = k === 'assistant' ? 'Assistant' : k === 'translator' ? `→ ${settings.modeLang || 'English'}` : m.label;
+    $('#modeChip').classList.toggle('on', k !== 'assistant');
+  };
+  drawMode();
+  bus.on('mode', drawMode);
+  $('#modeChip').addEventListener('click', async () => {
+    const { MODES, current, setMode } = await import('./modes.js');
+    const items = [{ header: 'AI mode' }, ...Object.entries(MODES).map(([k, m]) => ({ label: m.label, icon: m.icon, sub: m.desc, on: current() === k, action: async () => {
+      let lang;
+      if (k === 'translator') { lang = await dialog({ title: 'Translate into which language?', input: settings.modeLang || 'Spanish', okLabel: 'Start' }); if (!lang) return; }
+      setMode(k, lang); toast(k === 'assistant' ? 'Normal mode' : `${m.label} mode is on`);
+    } }))];
+    menu($('#modeChip'), items, { align: 'right' });
+  });
   $('#modelChip').addEventListener('click', () => {
     const e = ollama.engine;
     if ((e.status !== 'online' || ollama.isPhone()) && !isNative) { openSheet('models'); return; }
@@ -288,6 +320,10 @@ function wireComposer() {
   send.addEventListener('click', () => (assistant.run.busy || voice.voice.speaking ? stopAll() : submit()));
   $('#attachBtn').addEventListener('click', attach);
   $('#lookBtn').addEventListener('click', () => look.start({ question: input.value.trim() }));
+  // Search everything: button or ⌘K / Ctrl+K.
+  const openSearch = () => import('./ui/search.js').then((m) => m.openSearch());
+  $('#searchBtn').addEventListener('click', openSearch);
+  document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); openSearch(); } });
   if (isMobile()) $('#lookBtn').replaceChildren(iconNode('camera'));
   // Pictures: paste (⌘V a screenshot), drag and drop, or the paperclip.
   input.addEventListener('paste', (e) => {
@@ -304,7 +340,10 @@ function wireComposer() {
     e.preventDefault(); dragDepth = 0; hint?.remove();
     for (const f of e.dataTransfer.files) {
       if (f.type.startsWith('image/')) addPendingImage(f);
-      else if (f.size < 5e6) assistant.send(input.value.trim() || `Summarize “${f.name}” in a few key points.`, { attachment: { name: f.name, path: f.name, text: (await f.text()).slice(0, 24000) } });
+      else if (f.size < 25e6) {
+        try { const { readAnyFile } = await import('./documents.js'); const text = await readAnyFile({ name: f.name, file: f }); assistant.send(input.value.trim() || `Summarize “${f.name}” in a few key points.`, { attachment: { name: f.name, path: f.name, text: text.slice(0, 24000) } }); }
+        catch (err) { toast(err.message, { bad: true }); }
+      }
     }
   });
   bus.on('busy', (on) => {
@@ -364,12 +403,12 @@ async function addPendingImage(file) {
 
 async function attach() {
   try {
-    const f = await call('file.pickDocument', {}).catch(async (e) => { if (/desktop app/.test(e.message)) return call('file.open', { accept: '.txt,.md,.csv,.json,.html,.js,.py,image/*' }); throw e; });
+    const f = await call('file.pickDocument', {}).catch(async (e) => { if (/desktop app/.test(e.message)) return call('file.open', { accept: '.txt,.md,.csv,.json,.html,.js,.py,.pdf,.docx,.xlsx,image/*' }); throw e; });
     if (!f) return;
     if (f.imageDataUrl || f.image) { pending.push(f.image ? { data: f.image, thumb: f.thumb } : await look.prepareImage(f.imageDataUrl)); drawPending(); return; }
-    let doc = f;
-    if (!f.text && f.path) doc = await call('tool.read_document', { path: f.path });
-    const text = (doc.text || '').slice(0, 24000);
+    toast(`Reading ${f.name}…`, { icon: 'file', ms: 2500 });
+    const { readAnyFile } = await import('./documents.js');
+    const text = (await readAnyFile(f)).slice(0, 24000);
     const input = $('#input');
     const q = input.value.trim() || `Summarize “${f.name}” in a few key points.`;
     input.value = '';
@@ -424,7 +463,31 @@ function wireVoice() {
     try { await voice.listen('command'); setOrb('listening'); }
     catch (e) { toast(e.message, { bad: true, ms: 6000 }); setOrb('error', 'Microphone unavailable'); setTimeout(() => setOrb('idle'), 2500); }
   };
-  mic.addEventListener('click', toggleListen);
+  // Tap to start/stop, or hold to talk (push-to-talk): let go and it sends.
+  let holdTimer = 0, held = false;
+  mic.addEventListener('pointerdown', () => {
+    if (settings.voice.pushToTalk === false) return;
+    held = false;
+    holdTimer = setTimeout(async () => { held = true; if (!(voice.voice.listening && voice.voice.mode === 'command')) await toggleListen(); }, 350);
+  });
+  const release = () => { clearTimeout(holdTimer); if (held) { setTimeout(() => { if (voice.voice.listening && voice.voice.mode === 'command') call('listen.finish').catch(() => voice.stopListening()); }, 250); } };
+  mic.addEventListener('pointerup', release);
+  mic.addEventListener('pointerleave', release);
+  mic.addEventListener('click', (e) => { if (held) { held = false; e.preventDefault(); return; } toggleListen(); });
+  // Space bar push-to-talk when you're not typing somewhere.
+  let spaceDown = false;
+  // Only when nothing has focus, so Space still presses buttons and types in boxes.
+  const typing = () => { const ae = document.activeElement; return !!ae && ae !== document.body && ae.id !== 'orbHit'; };
+  document.addEventListener('keydown', (e) => {
+    if (e.code !== 'Space' || e.repeat || typing() || settings.voice.pushToTalk === false || document.querySelector('.sheet-layer, .ask-layer, .call-screen')) return;
+    e.preventDefault(); spaceDown = true;
+    if (!(voice.voice.listening && voice.voice.mode === 'command')) toggleListen();
+  });
+  document.addEventListener('keyup', (e) => {
+    if (e.code !== 'Space' || !spaceDown) return;
+    spaceDown = false;
+    setTimeout(() => { if (voice.voice.listening && voice.voice.mode === 'command') call('listen.finish').catch(() => voice.stopListening()); }, 250);
+  });
   $('#orbHit').addEventListener('click', () => { if (voice.voice.speaking || assistant.run.busy) stopAll(); else toggleListen(); });
   app.toggleListen = toggleListen;
 
@@ -443,7 +506,26 @@ function wireVoice() {
     else setOrb(ollama.engine.status === 'online' ? 'idle' : 'offline');
     if (!v.listening) { $('#partial').hidden = true; $('#main').classList.remove('voice-live'); }
   });
-  bus.on('voice.wake', () => { setOrb('listening'); app.viz.kick(1); call('app.chime', { kind: 'wake' }).catch(() => {}); });
+  // "JARVIS" → "Yes?" → listen for the request → back to wake-word listening.
+  // If the request follows straight away ("JARVIS, open Safari") nothing is said, so it isn't cut off.
+  bus.on('voice.wake', () => {
+    setOrb('listening'); app.viz.kick(1);
+    const reply = settings.voice.wakeReply ?? 'Yes?';
+    if (!reply || !can('voiceOut')) { call('app.chime', { kind: 'wake' }).catch(() => {}); return; }
+    let heard = false;
+    const off = bus.on('voice.partial', (t) => { if (t) heard = true; });
+    setTimeout(() => {
+      off();
+      if (heard || !voice.voice.listening || voice.voice.mode !== 'command') return;
+      app.wakeReplying = true;
+      voice.stopListening();
+      let done = false;
+      const next = () => { if (done) return; done = true; offDone(); voice.listen('command').then(() => setOrb('listening')).catch(() => {}).finally(() => { app.wakeReplying = false; syncWake(); }); };
+      const offDone = bus.on('voice.done', next);
+      setTimeout(next, 2500); // never get stuck if the voice doesn't report back
+      voice.speak(reply);
+    }, 650);
+  });
   bus.on('voice.final', (text) => {
     $('#partial').hidden = true;
     if (assistant.run.confirmResolvers.size) { bus.emit('voice.final.confirm', text); return; }
@@ -469,6 +551,7 @@ function wireVoice() {
 
 /** Keep wake-word listening running when it is enabled and JARVIS is idle. */
 async function syncWake() {
+  if (app.wakeReplying) return;
   if (!settings.voice.wake || !can('wake') || !settings.setupDone) { if (voice.voice.mode === 'wake') voice.stopListening(); return; }
   if (voice.voice.listening || voice.voice.speaking || assistant.run.busy) return;
   try { await voice.listen('wake'); setOrb(ollama.engine.status === 'online' ? 'idle' : 'offline'); }

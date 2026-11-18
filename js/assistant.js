@@ -8,9 +8,10 @@ import * as skills from './skills.js';
 import * as tools from './tools.js';
 import * as intents from './intents.js';
 import * as voiceMod from './voice.js';
-import { info, isNative, call } from './host.js';
+import { info, isNative, call, can } from './host.js';
 import { bus, uid, tokens, truncate } from './util.js';
 import { parseWhen } from './when.js';
+import { prompt as modePrompt, brief as modeBrief } from './modes.js';
 
 const imageData = new WeakMap(); // message -> base64 images (kept in memory only, not saved)
 const tightData = new WeakMap(); // message -> just the circled part, for the small on-device picture AI
@@ -82,6 +83,16 @@ export async function send(text, { viaVoice = false, attachment = null, images =
     if (speakOn) voiceMod.speak(reply);
     return;
   }
+  if (intent?.local === 'research' || intent?.local === 'team') { await runDeep(intent, text, viaVoice, speakOn); return; }
+  if (intent?.local === 'cards' || intent?.local === 'compare') { await runStudy(intent, text, viaVoice, speakOn); return; }
+  if (intent?.local === 'pullmodel') {
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    if (!can('imageGen')) { push({ role: 'assistant', content: 'Making pictures needs the JARVIS Mac app with Ollama (it uses about 6 GB of memory, more than phones or the website can use).', instant: true }); return; }
+    push({ role: 'assistant', content: intent.say, instant: true });
+    import('./ui/models.js').then((m) => { m.download(intent.model, 5.7); import('./ui/sheets.js').then((s) => s.openSheet('models')); });
+    return;
+  }
+  if (intent?.local === 'edit') { import('./ui/imageedit.js').then((m) => m.openEditor()); return; }
   if (intent?.local === 'open') {
     push({ role: 'user', content: text, voice: viaVoice || undefined });
     push({ role: 'assistant', content: intent.say || 'Here it is.', instant: true });
@@ -166,6 +177,7 @@ function attachExtras(msg, name, res) {
   if (res.ok && tool?.reveal) msg.reveal = tool.reveal(res);
   if (res.ok && name === 'find_files' && res.files?.length) msg.files = res.files.slice(0, 12);
   if (res.ok && name === 'set_reminder') msg.reminderId = res.id;
+  if (res.ok && name === 'generate_image') msg.picture = res.picture;
 }
 
 /** Website-shortcut plugin: open its page for the text the user gave. */
@@ -209,6 +221,12 @@ async function systemPrompt(viaVoice, query) {
   const hi = await info();
   const name = settings.assistantName || 'JARVIS';
   const user = settings.userName?.trim();
+  // Tiny processor-only models get confused by long instructions: keep theirs short.
+  if (ollama.isPhone() && String(settings.ai.model).startsWith('wasm:')) {
+    return [`You are ${name}, a helpful assistant.${user ? ` The user's name is ${user}.` : ''}`, modeBrief(),
+      'Answer in one to three short, correct sentences. If you are not sure, say so.',
+      settings.replyLanguage && settings.replyLanguage !== 'auto' ? `Always reply in ${settings.replyLanguage}.` : ''].filter(Boolean).join(' ');
+  }
   const hon = settings.honorific;
   const address = hon === 'name' ? user : hon === 'none' ? '' : hon;
   const persona = {
@@ -235,12 +253,22 @@ async function systemPrompt(viaVoice, query) {
     settings.aboutYou?.trim() ? `About the user, in their words: ${truncate(settings.aboutYou.trim(), 1200)}` : '',
     settings.customInstructions?.trim() ? `How the user wants you to respond: ${truncate(settings.customInstructions.trim(), 1500)}` : '',
     settings.replyLanguage && settings.replyLanguage !== 'auto' ? `Always reply in ${settings.replyLanguage}.` : 'Reply in the language the user writes in.',
+    modePrompt(),
+    await projectPrompt(),
     viaVoice ? 'This reply will be spoken aloud: answer in one to three short, natural sentences, with no Markdown, lists, tables or emoji, unless the user asks for detail.' : '',
   ];
   return lines.filter(Boolean).join('\n\n');
 }
 
 const useTools = () => settings.ai.tools && ollama.hasCap('tools');
+
+/** When this chat belongs to a project, the AI sees the project's tasks and notes. */
+async function projectPrompt() {
+  const s = sessions.state.current;
+  if (!s) return '';
+  const pj = await import('./projects.js');
+  return pj.contextFor(s.projectId ? pj.get(s.projectId) : pj.projectOfChat(s.id));
+}
 
 function historyFor(s, budget, lastUser = null) {
   const out = [];
@@ -549,6 +577,71 @@ export function say(userText, reply, { viaVoice = false, images = [] } = {}) {
   push({ role: 'user', content: userText, voice: viaVoice || undefined, images: images.length ? images : undefined });
   push({ role: 'assistant', content: reply, instant: true });
   if (speakThisTurn(viaVoice)) voiceMod.speak(reply);
+}
+
+/** Flashcards (from a topic or a document) and comparing two documents. */
+async function runStudy(intent, text, viaVoice, speakOn) {
+  push({ role: 'user', content: text, voice: viaVoice || undefined });
+  if (ollama.engine.status !== 'online') await ollama.detect();
+  if (ollama.engine.status !== 'online' || !settings.ai.model) { push({ role: 'assistant', content: '', errorKind: 'nomodel', error: 'This needs the AI. Get a free model first.' }); return; }
+  const { readAnyFile } = await import('./documents.js');
+  const { toast } = await import('./ui/common.js');
+  const pickDoc = async (hint) => { toast(hint, { icon: 'file', ms: 4000 }); const f = await call('file.open', { accept: '.txt,.md,.csv,.json,.html,.pdf,.docx,.xlsx', types: ['txt', 'md', 'csv', 'json', 'html', 'pdf', 'docx', 'xlsx'] }); return f ? { name: f.name, text: await readAnyFile(f) } : null; };
+  const msg = push({ role: 'assistant', content: '', pending: true, model: settings.ai.model, loading: 'Working…' });
+  setBusy(true);
+  try {
+    const study = await import('./study.js');
+    if (intent.local === 'cards') {
+      const doc = intent.fromFile ? await pickDoc('Choose the document to make flashcards from') : null;
+      if (intent.fromFile && !doc) throw new Error('No document chosen.');
+      msg.loading = 'Writing flashcards'; update(msg);
+      const cards = await study.makeCards({ topic: intent.topic, text: doc?.text });
+      msg.cards = cards;
+      msg.content = `**${cards.length} flashcards** ${doc ? `from ${doc.name}` : `about ${intent.topic}`}. Tap a card to see the answer.`;
+    } else {
+      const a = await pickDoc('Choose the FIRST document');
+      if (!a) throw new Error('No document chosen.');
+      const b = await pickDoc('Now choose the SECOND document');
+      if (!b) throw new Error('No second document chosen.');
+      msg.loading = `Comparing ${a.name} and ${b.name}`; update(msg);
+      msg.content = `**${a.name}** vs **${b.name}**\n\n${await study.compare(a, b, intent.focus)}`;
+    }
+  } catch (e) { msg.error = friendlyError(e.message); msg.errorKind = 'deep'; }
+  finally { Object.assign(msg, { pending: false, loading: '' }); update(msg); setBusy(false); bus.emit('turn.done', { viaVoice }); }
+  if (speakOn && msg.content) voiceMod.speak(msg.content.split('\n\n')[0]);
+}
+
+/** Deep research or a team of AI agents: progress in one message, then the result. */
+async function runDeep(intent, text, viaVoice, speakOn) {
+  push({ role: 'user', content: text, voice: viaVoice || undefined });
+  if (ollama.engine.status !== 'online') await ollama.detect();
+  if (ollama.engine.status !== 'online' || !settings.ai.model) { push({ role: 'assistant', content: '', errorKind: 'nomodel', error: 'Research and the agent team need the AI. Get a free model first.' }); return; }
+  const R = await import('./research.js');
+  const isTeam = intent.local === 'team';
+  const msg = push({ role: 'assistant', content: '', pending: true, model: settings.ai.model, loading: isTeam ? 'Assembling the team' : 'Starting the research', steps: [] });
+  setBusy(true);
+  bus.emit('state', 'thinking');
+  run.cancel = () => { run.stopped = true; R.complete.cancel?.(); };
+  const onStep = (st) => { msg.steps.push(st.text); msg.loading = st.text; update(msg); };
+  try {
+    if (isTeam) {
+      const r = await R.team(intent.task, { onStep });
+      msg.content = r.answer;
+      msg.agentNotes = R.ROLES.filter((x) => r.notes[x.id]).map((x) => ({ name: x.name, icon: x.icon, text: r.notes[x.id] }));
+    } else {
+      const r = await R.research(intent.topic, { onStep });
+      msg.content = r.report;
+    }
+  } catch (e) {
+    if (!run.stopped) { msg.error = friendlyError(e.message); msg.errorKind = 'deep'; }
+  } finally {
+    Object.assign(msg, { pending: false, loading: '' });
+    update(msg);
+    run.cancel = null;
+    setBusy(false);
+    bus.emit('turn.done', { viaVoice });
+  }
+  if (speakOn && msg.content) voiceMod.speak(msg.content.split('\n\n')[0]);
 }
 
 /** Answer a picture question with the on-device picture AI (asks before the one-time download). */

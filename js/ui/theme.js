@@ -9,6 +9,7 @@ export const THEMES = [
   { id: 'emerald', name: 'Emerald', desc: 'Green and teal', a: '#34f5b0', b: '#1aa6c9', bg: '#020c0b' },
   { id: 'solar', name: 'Solar', desc: 'Amber and orange', a: '#ffb23f', b: '#ff6a2b', bg: '#0c0703' },
   { id: 'stealth', name: 'Stealth', desc: 'Silver on black', a: '#dfe8f2', b: '#8796a8', bg: '#07080a' },
+  { id: 'daylight', name: 'Daylight', desc: 'Light mode: navy on white', a: '#0877b8', b: '#2f5bff', bg: '#eef3f9' },
 ];
 
 const hexToRgb = (hex) => {
@@ -27,6 +28,7 @@ export function applyAppearance() {
   root.classList.toggle('glass-low', a.glass === 'low');
   root.classList.toggle('glass-off', a.glass === 'off');
   root.classList.toggle('motion-off', a.motion === 'off');
+  root.classList.toggle('contrast-high', !!a.highContrast);
   const reduce = a.motion !== 'full' || matchMedia('(prefers-reduced-motion: reduce)').matches;
   root.classList.toggle('motion-reduced', reduce);
   bus.emit('theme');

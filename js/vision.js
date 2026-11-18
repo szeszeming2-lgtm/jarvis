@@ -18,7 +18,7 @@ let lib = null, processor = null, model = null, loading = null;
 export const downloaded = () => !!settings.ai?.pictureAI;
 export const ready = () => !!model;
 
-async function library() {
+export async function library() {
   if (!lib) {
     lib = await import(/* @vite-ignore */ LIB);
     lib.env.allowLocalModels = false;

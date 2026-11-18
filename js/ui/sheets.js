@@ -7,6 +7,8 @@ const TABS = [
   ['voice', 'Voice', 'mic'],
   ['plugins', 'Plugins', 'puzzle'],
   ['workout', 'Workouts', 'zap'],
+  ['projects', 'Projects', 'folder'],
+  ['planner', 'Planner', 'target'],
   ['lists', 'Lists & People', 'list'],
   ['sync', 'Link devices', 'refresh'],
   ['memory', 'Memory', 'brain'],

@@ -31,10 +31,24 @@ function schedule(r) {
   timers.set(r.id, setTimeout(() => (r.due - Date.now() > 1000 ? schedule(r) : fire(r)), Math.min(Math.max(0, wait), 86400000)));
 }
 
+/** The next time a repeating reminder is due after `from`. */
+export function nextDue(due, repeat, from = Date.now()) {
+  const d = new Date(due);
+  const step = () => {
+    if (repeat === 'daily') d.setDate(d.getDate() + 1);
+    else if (repeat === 'weekdays') { do d.setDate(d.getDate() + 1); while (d.getDay() === 0 || d.getDay() === 6); }
+    else if (repeat === 'weekly') d.setDate(d.getDate() + 7);
+    else if (repeat === 'monthly') d.setMonth(d.getMonth() + 1);
+  };
+  do step(); while (d.getTime() <= from);
+  return d.getTime();
+}
+
 function fire(r, missed = false) {
   if (r.done) return;
-  r.done = true;
   r.firedAt = Date.now();
+  if (r.repeat) { r.due = nextDue(r.due, r.repeat); schedule(r); } // repeating: set up the next one
+  else r.done = true;
   save();
   bus.emit('reminder.due', { ...r, missed });
   const title = `${settings.assistantName} reminder`;
@@ -52,7 +66,7 @@ function browserNotify(title, body) {
 }
 
 /** Create a reminder. when = phrase ("in 10 minutes", "at 5pm") or a Date/ms. */
-export async function add(text, when, { textMe = false, callMe = false } = {}) {
+export async function add(text, when, { textMe = false, callMe = false, repeat = '' } = {}) {
   text = String(text || '').trim().replace(/^(to|that)\s+/i, '');
   if (!text) throw new Error('What should I remind you about?');
   let due;
@@ -64,16 +78,18 @@ export async function add(text, when, { textMe = false, callMe = false } = {}) {
     due = p.date.getTime();
   }
   if (due < Date.now() - 60000) throw new Error('That time has already passed.');
-  const r = { id: uid('r'), text, due, created: Date.now(), done: false, textMe: !!textMe, callMe: !!callMe };
+  if (repeat === 'weekdays') { const d = new Date(due); while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); due = d.getTime(); }
+  const r = { id: uid('r'), text, due, created: Date.now(), done: false, textMe: !!textMe, callMe: !!callMe, repeat: ['daily', 'weekdays', 'weekly', 'monthly'].includes(repeat) ? repeat : '' };
   // Desktop app: also put it in the system Reminders app (syncs to your phone).
   if (can('reminders') && settings.reminders?.system !== false) {
-    try { const s = await call('reminders.add', { text, due }); r.systemId = s?.id; } catch (e) { r.systemError = e.message; }
+    try { const s = await call('reminders.add', { text, due, repeat: r.repeat }); r.systemId = s?.id; } catch (e) { r.systemError = e.message; }
   }
   items.push(r);
   schedule(r);
   save();
   if (!isNative && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
-  return { ...r, human: describeWhen(new Date(due)) };
+  const REP = { daily: 'every day', weekdays: 'every weekday', weekly: `every ${new Date(due).toLocaleDateString(undefined, { weekday: 'long' })}`, monthly: 'every month' };
+  return { ...r, human: r.repeat ? `${REP[r.repeat]} at ${new Date(due).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}, starting ${describeWhen(new Date(due))}` : describeWhen(new Date(due)) };
 }
 
 export async function cancel(id) {
@@ -101,6 +117,7 @@ export function toICS(r) {
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//JARVIS//Reminders//EN', 'CALSCALE:GREGORIAN',
     'BEGIN:VEVENT', `UID:${r.id}@jarvis.local`, `DTSTAMP:${z(Date.now())}`, `DTSTART:${z(r.due)}`, `DTEND:${z(r.due + 15 * 60000)}`,
     `SUMMARY:${esc(r.text)}`, 'DESCRIPTION:Reminder from JARVIS',
+    ...(r.repeat ? [`RRULE:${{ daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY' }[r.repeat]}`] : []),
     'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(r.text)}`, 'TRIGGER:PT0S', 'END:VALARM',
     'END:VEVENT', 'END:VCALENDAR', '',
   ].join('\r\n');

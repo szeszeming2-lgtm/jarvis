@@ -68,6 +68,7 @@ export async function collect({ chats = 40 } = {}) {
     settings: pick(settings),
     memory: await read('memory', []), skills: await read('skills', []), lists: await read('lists', {}), people: await read('people', []),
     reminders: await read('reminders', []), workouts: await read('workouts', []),
+    projects: await read('projects', []), planner: await read('planner', {}),
     sessionIndex: keep, sessions,
   };
 }
@@ -98,6 +99,17 @@ export function merge(local, incoming) {
   out.people = m('people', local.people, incoming.people, (x) => low(x.name), (a, b) => ({ ...b, ...Object.fromEntries(Object.entries(a).filter(([, v]) => v !== '' && v != null)), id: a.id }));
   out.reminders = m('reminders', local.reminders, incoming.reminders, (x) => x.id, (a, b) => ({ ...a, done: a.done || b.done }));
   out.workouts = m('workouts', local.workouts, incoming.workouts, (x) => x.id);
+  out.projects = m('projects', local.projects, incoming.projects, (x) => x.id);
+  // Planner: habits joined by name (ticked days from both), goals and money entries by id.
+  const lp = local.planner || {}, ip = incoming.planner || {};
+  out.planner = {
+    ...lp,
+    habits: m('habits', lp.habits, ip.habits, (x) => low(x.name), (a, b) => ({ ...a, days: { ...(b.days || {}), ...(a.days || {}) } })),
+    goals: m('goals', lp.goals, ip.goals, (x) => x.id),
+    money: m('money entries', lp.money, ip.money, (x) => x.id),
+    budget: lp.budget?.monthly ? lp.budget : ip.budget || lp.budget || { monthly: 0 },
+    stopwatch: lp.stopwatch || { start: 0, elapsed: 0, laps: [] },
+  };
   out.lists = { ...(local.lists || {}) };
   counts['list items'] = 0;
   for (const [name, items] of Object.entries(incoming.lists || {})) {
@@ -129,6 +141,7 @@ export async function apply(incoming) {
   for (const r of data.reminders) if (!r.done && r.due < now - 60000 && !local.reminders.some((x) => x.id === r.id)) r.done = true;
   await write('memory', data.memory); await write('skills', data.skills); await write('people', data.people);
   await write('reminders', data.reminders); await write('workouts', data.workouts); await write('lists', data.lists);
+  await write('projects', data.projects); await write('planner', data.planner);
   for (const s of data.sessions) await write('session-' + s.id, s);
   await write('sessions', data.sessionIndex);
   Object.assign(settings, data.settings);

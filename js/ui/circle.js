@@ -141,7 +141,8 @@ function build(question, resolve) {
     stage.replaceChildren(canvas);
     tools.replaceChildren(
       h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => { stroke = []; paint(); hint.textContent = 'Draw a circle around it.'; } }, iconNode('refresh'), 'Clear circle'),
-      h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: showPicker }, iconNode('image'), 'New picture'));
+      h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: showPicker }, iconNode('image'), 'New picture'),
+      h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: async () => { const src = base; close(null); const m = await import('./imageedit.js'); m.openEditor(src); } }, iconNode('edit'), 'Edit picture'));
     bottom.hidden = false;
     fit();
     if (!mobile()) setTimeout(() => qInput.focus(), 50);

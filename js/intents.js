@@ -7,6 +7,9 @@ import { summaryText as workoutSummaryText } from './workout.js';
 import { knows as knowsUnit } from './converter.js';
 import { APPS, normApp } from './messaging.js';
 import { HANDLES } from './people.js';
+import { find as findMode } from './modes.js';
+import { findHabit } from './planner.js';
+import { parseRequest as parseAutomation } from './automations.js';
 
 const listWords = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]);
 
@@ -29,6 +32,7 @@ export function match(raw, { customSkills = [] } = {}) {
   const t = clean(raw);
   const low = t.toLowerCase();
   if (!low) return null;
+  let r;
 
   // Morning briefing: real weather, calendar, reminders and to-dos (before the old "brief" skill).
   if (/^(?:good morning|morning|morning brief(?:ing)?|brief me|my briefing|daily briefing|\/brief|what'?s my day(?: look)?(?: like)?(?: today)?|what(?:'s| is) (?:on )?(?:my day|today|my plate today|my schedule today)|what do i (?:have|need) to do today|what'?s happening today|plan my day|my day)(?:,? (?:jarvis|computer|sir|ma'?am|boss|buddy))?$/i.test(low)) return { tool: 'morning_briefing', args: {} };
@@ -45,13 +49,71 @@ export function match(raw, { customSkills = [] } = {}) {
 
   if (/^(stop|cancel|be quiet|quiet|shush|shut up|enough|never ?mind|that'?s enough)$/i.test(low)) return { local: 'stop' };
   if (/^(new (chat|conversation)|start over|clear (the )?chat)$/i.test(low)) return { local: 'newchat' };
+  // Projects: "new project kitchen renovation", "add buy tiles to the kitchen project", "how is the kitchen project going"
+  if ((r = t.match(/^(?:new project|create (?:a |new )?project|start (?:a |new )?project|make (?:a |new )?project)(?: called| named|:)? (.{2,80})$/i))) return { tool: 'create_project', args: { name: r[1] } };
+  if ((r = t.match(/^add (.+?) to (?:my |the |our )?(.+?) project$/i))) return { tool: 'add_project_task', args: { project: r[2], task: r[1] } };
+  if ((r = t.match(/^(?:i )?(?:finished|completed|did|done with|tick off|check off) (.+?) (?:in|for|on) (?:my |the |our )?(.+?) project$/i))) return { tool: 'complete_project_task', args: { project: r[2], task: r[1] } };
+  if (/^(?:show |list |open )?(?:my |all )?projects$/i.test(low)) return { tool: 'project_status', args: {} };
+  if ((r = low.match(/^how(?:'s| is| are) (?:my |the |our )?(.+?) project(?: going| doing)?$|^(?:status|progress) (?:of|on) (?:my |the )?(.+?)(?: project)?$/))) return { tool: 'project_status', args: { project: r[1] || r[2] } };
+
+  // Study: flashcards and comparing documents
+  if ((r = t.match(/^(?:make|create|give me|generate) (?:some |me )?flash ?cards(?: (?:about|on|for|of|from) (.{2,160}))?$/i))) return /^(?:a |this |my |the )?(?:document|file|pdf|notes?)$/i.test(r[1] || 'document') ? { local: 'cards', fromFile: true } : { local: 'cards', topic: r[1] };
+  if ((r = t.match(/^compare (?:two |these |2 |my )?(?:documents|files|pdfs|docs|versions)(?: (?:for|about|on) (.{2,120}))?$/i))) return { local: 'compare', focus: r[1] || '' };
+
+  // Deep research and a team of AI agents
+  if ((r = t.match(/^(?:\/research|deep research|do (?:some |deep )?research|research|investigate|find out everything)(?: (?:on|about|into))? (.{3,200})$/i)) && !/^(mode|my )/i.test(r[1])) return { local: 'research', topic: r[1].replace(/^(?:the topic )/i, '') };
+  if ((r = t.match(/^(?:\/team|team(?: up)?(?: on)?:?|(?:use|get) (?:a |the )?team(?: of (?:ai )?agents)? (?:to|for|on)|(?:have|let) (?:the |a )?(?:ai )?(?:team|agents) (?:work on|do)) (.{3,400})$/i))) return { local: 'team', task: r[1] };
+  // AI modes: "study mode", "switch to developer mode", "translator mode to French", "normal mode", "exit study mode"
+  if ((r = low.match(/^(?:switch to |go to |turn on |enter |use |start |activate |change to )?(?:the )?([a-z ]{3,22}?) mode(?: on)?(?: (?:to|into|in) ([a-z]{3,15}))?$/)) && findMode(r[1])) return { tool: 'set_mode', args: { mode: findMode(r[1]), language: r[2] || '' } };
+  if (/^(?:exit|leave|stop|turn off|end|quit) (?:the )?[a-z ]{3,22} mode$|^(?:back to )?normal(?: mode)?$/.test(low)) return { tool: 'set_mode', args: { mode: 'assistant' } };
+  if ((r = low.match(/^translate (?:everything|all|what i say) (?:in)?to ([a-z]{3,15})$/))) return { tool: 'set_mode', args: { mode: 'translator', language: r[1] } };
   if (/^(link|sync|connect|pair) (my |the |all my |both )?(devices|phone|iphone|mac|computer|laptop)( and (my )?(phone|iphone|mac|computer|laptop))?( together)?$|^(sign in|log in|login|signin)$|^(make )?(everything|it) the same on (all )?(my )?(devices|phone and (mac|computer))$/i.test(low)) return { local: 'open', tab: 'sync', say: 'Here’s Link devices. Send from one device and receive on the other, and they’ll match. No account needed.' };
   if (/^(open |show )?(the )?(plugins?|plugin store|add (a )?plugins?)$/i.test(low)) return { local: 'open', tab: 'plugins', say: 'Here are your plugins and the plugin store.' };
   if (/^(share (jarvis|this app|the app|the link|your link|you|the url)|(send|give) (me )?(the|your) (link|url)|what'?s (the|your) (link|url)|copy (the|your) (link|url))$/i.test(low)) return { local: 'share' };
 
+  // Repeating reminders: "remind me every day at 8am to take my vitamins", "remind me to stretch every weekday at 3pm"
+  const EVERY = '(day|morning|evening|night|weekday|week|month|sunday|monday|tuesday|wednesday|thursday|friday|saturday)';
+  const DAYS_RE = /^(sun|mon|tues|wednes|thurs|fri|satur)day$/;
+  const AT = '(?:at )?(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm|a\\.m\\.|p\\.m\\.)?|noon|midnight)';
+  let rep = null;
+  if ((r = t.match(new RegExp(`^(remind|text) me every ${EVERY}(?: ${AT})? (?:to|about|that) (.+)$`, 'i')))) rep = { kind: r[1], every: r[2], at: r[3], what: r[4] };
+  else if ((r = t.match(new RegExp(`^(remind|text) me (?:to|about|that) (.+?) every ${EVERY}(?: ${AT})?$`, 'i')))) rep = { kind: r[1], what: r[2], every: r[3], at: r[4] };
+  if (rep) {
+    const e = rep.every.toLowerCase();
+    const repeat = ['day', 'morning', 'evening', 'night'].includes(e) ? 'daily' : e === 'weekday' ? 'weekdays' : e === 'month' ? 'monthly' : 'weekly';
+    const time = rep.at || { morning: '8am', evening: '6pm', night: '9pm' }[e] || '9am';
+    const day = DAYS_RE.test(e) ? e + ' ' : '';
+    return { tool: 'set_reminder', args: { text: rep.what, when: `${day}at ${time}`, repeat, text_me: rep.kind.toLowerCase() === 'text' } };
+  }
+
+  // Automations: "every weekday at 9am start my workday", "open Spotify every morning at 8"
+  { const au = /\b(?:every|each) (?:day|morning|evening|night|weekday|week|month|hour|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i.test(t) && !/^(?:remind|text|call|wake) me\b/i.test(t) ? parseAutomation(t) : null;
+    if (au) return { tool: 'create_automation', args: au }; }
+
+  // Planner: habits, goals, budget, stopwatch, voice notes
+  if ((r = t.match(/^(?:add|new|start|track) (?:a )?habit(?: of| to| called)?:? (.{2,60})$/i))) return { tool: 'add_habit', args: { habit: r[1] } };
+  if ((r = t.match(/^(?:i did|i've done|i have done|done|finished|tick off|check off|mark) (?:my |the )?(.{2,50}?)(?: habit)?(?: today| for today)?(?: as done| done)?$/i)) && findHabit(r[1])) return { tool: 'check_habit', args: { habit: findHabit(r[1]).name } };
+  if (/^(?:my |show (?:me )?my )?habits?(?: streaks?| today)?$|^how are my habits(?: going)?$/i.test(low)) return { tool: 'habits_summary', args: {} };
+  if ((r = t.match(/^(?:new goal|add (?:a )?goal|set (?:a |my )?goal(?: to)?|my goal is(?: to)?):? (.{3,100})$/i))) return { tool: 'add_goal', args: { goal: r[1] } };
+  if ((r = t.match(/^add (\d+(?:\.\d+)?) (?:\S+ )?to (?:my |the )?(.+?) goal$/i))) return { tool: 'update_goal', args: { goal: r[2], amount: +r[1] } };
+  if (/^(?:my |show (?:me )?my )?goals$|^how are my goals(?: going)?$/i.test(low)) return { tool: 'goals_summary', args: {} };
+  if ((r = t.match(/^(?:i )?(?:just )?(?:spent|paid|bought|log (?:an )?expense(?: of)?|expense:?) [$€£¥]?\s?(\d+(?:[.,]\d{1,2})?)(?:\s?(?:dollars?|euros?|pounds?|bucks|yen|usd|eur|gbp|cad|aud))?(?: (?:on|for|at) (.{2,60}))?$/i))) return { tool: 'log_money', args: { amount: +r[1].replace(',', '.'), note: r[2] || '', kind: 'expense' } };
+  if ((r = t.match(/^(?:i )?(?:earned|got paid|received|made|log income(?: of)?|income:?) [$€£¥]?\s?(\d+(?:[.,]\d{1,2})?)(?:\s?(?:dollars?|euros?|pounds?|bucks))?(?: (?:from|for) (.{2,60}))?$/i))) return { tool: 'log_money', args: { amount: +r[1].replace(',', '.'), note: r[2] || '', kind: 'income' } };
+  if (/^(?:how much (?:have i|did i) spen[dt](?: this month)?|my (?:spending|budget|expenses)|budget(?: summary)?|spending this month)$/i.test(low)) return { tool: 'budget_summary', args: {} };
+  if ((r = t.match(/^set (?:my )?(?:monthly )?budget (?:to )?[$€£]?(\d+(?:\.\d+)?)$/i))) return { tool: 'set_budget', args: { amount: +r[1] } };
+  if ((r = low.match(/^(start|stop|pause|reset|lap)(?: the| a)? stopwatch$|^stopwatch (start|stop|reset|lap)$|^how long (?:has|is) the stopwatch(?: been)?(?: running)?$/))) return { tool: 'stopwatch', args: { action: (r[1] || r[2] || 'check').replace('pause', 'stop') } };
+  if ((r = t.match(/^(?:\/imagine|(?:please )?(?:draw|paint|generate|create|make|imagine|design)(?: me| us)? (?:an? |some )?(?:image|picture|photo|drawing|painting|illustration|art(?:work)?|poster|logo)s? (?:of|showing|with|for)) (.{3,600})$/i))) return { tool: 'generate_image', args: { prompt: r[1] } };
+  if (/^(?:download|get|install) (?:the )?(?:picture|image|art) (?:model|ai)$/i.test(low)) return { local: 'pullmodel', model: 'x/flux2-klein', say: 'Downloading FLUX.2 Klein, the free picture model (5.7 GB). You can watch it in AI Models.' };
+  if (/^(?:take|grab|capture|save) (?:a )?(?:screenshot|screen ?shot|screen capture)(?: of (?:my |the )?screen)?$|^screenshot$/i.test(low)) return { tool: 'take_screenshot', args: {} };
+  if ((r = t.match(/^(?:make|create|add|new) (?:a )?(?:new )?folder(?: called| named)? ["“]?(.+?)["”]?(?: (?:on|in) (?:my |the )?(desktop|documents|downloads|pictures|home(?: folder)?))?$/i))) return { tool: 'create_folder', args: { name: r[1], in: r[2] || '' } };
+  if ((r = t.match(/^rename ["“]?(.+?)["”]? (?:to|as) ["“]?(.+?)["”]?$/i))) return { tool: 'rename_file', args: { file: r[1], new_name: r[2] } };
+  if (/^(?:what'?s|what is|read|show(?: me)?) (?:on |in )?(?:my |the )?clipboard$|^read what i copied$/i.test(low)) return { tool: 'read_clipboard', args: {} };
+  if ((r = t.match(/^copy ["“](.+)["”](?: to (?:my |the )?clipboard)?$/i))) return { tool: 'copy_to_clipboard', args: { text: r[1] } };
+  if (/^(?:edit|crop|rotate|fix|touch up|filter) (?:a |my |this |the )?(?:photo|picture|image|pic)$|^(?:open (?:the )?)?(?:photo|picture|image) editor$/i.test(low)) return { local: 'edit' };
+  if (/^(?:record|take|make|start) (?:a )?voice (?:note|memo)$/i.test(low)) return { local: 'open', tab: 'planner', say: 'Tap “Record a voice note” and start talking. Tap again to save it.' };
+
   // Reminders: "remind me to X in 10 minutes", "remind me at 5pm to X", "text me tomorrow at 9 to X"
   const TIME = '(in .+?|at .+?|by .+?|tomorrow(?: (?:at|morning|afternoon|evening|night) ?.*?)?|tonight(?: at .+?)?|this (?:morning|afternoon|evening)(?: at .+?)?|(?:on |next |this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?: at .+?)?|at noon|at midnight)';
-  let r;
   const remindRe1 = new RegExp(`^(remind|text|message) me (?:a reminder )?${TIME} (?:to|about|that) (.+)$`, 'i');
   const remindRe2 = new RegExp(`^(remind|text|message) me (?:to|about|that) (.+?) ${TIME}$`, 'i');
   const remindRe4 = new RegExp(`^(?:don'?t let me forget|make sure i (?:don'?t forget|remember)|help me remember|i need to remember|i have to remember|ping me) (?:to |about |that )?(.+?) ${TIME}$`, 'i');
@@ -279,6 +341,29 @@ export function reply(intent, res, name = 'JARVIS') {
     case 'log_workout': return `Logged **${r.logged}**. That’s ${r.week} workout${r.week === 1 ? '' : 's'} this week${r.streak > 1 ? `, and a ${r.streak}-day streak 🔥` : ''}.`;
     case 'workout_summary': return workoutSummaryText(r);
     case 'convert_units': return r.text + '.';
+    case 'create_project': return `Created the **${r.name}** project. Add tasks (“add buy paint to the ${r.name} project”), notes and documents under Projects.`;
+    case 'add_project_task': return `Added to **${r.project}**: ${listWords(r.added)}. ${r.done} of ${r.total} tasks done.`;
+    case 'complete_project_task': return `Ticked off “${r.task}” in **${r.project}**. ${r.pct}% done (${r.done} of ${r.total}).${r.pct === 100 ? ' 🎉 Project complete!' : ''}`;
+    case 'project_status': return r.projects ? (r.projects.length ? `Your projects:\n\n${r.projects.map((p) => `- **${p.name}**: ${p.pct}% (${p.done}/${p.total} tasks)`).join('\n')}` : 'No projects yet. Say “new project” and a name.')
+      : `**${r.project}** is ${r.pct}% done (${r.done} of ${r.total} tasks).${r.open.length ? `\n\nStill to do:\n${r.open.slice(0, 10).map((x) => '- ' + x).join('\n')}` : ''}`;
+    case 'add_habit': return `Tracking **${r.habit}** every day. Say “I did ${r.habit.toLowerCase()}” to tick it off.`;
+    case 'check_habit': return `Ticked off **${r.habit}** for today.${r.streak > 1 ? ` That’s a ${r.streak}-day streak${r.streak >= 3 ? ' 🔥' : ''}.` : ''}`;
+    case 'habits_summary': return r.habits.length ? `Your habits today:\n\n${r.habits.map((x) => `- ${x.today ? '✅' : '⬜'} **${x.name}**${x.streak ? ` · ${x.streak}-day streak` : ''}`).join('\n')}` : 'No habits yet. Say “add habit read 20 minutes”.';
+    case 'add_goal': return `New goal: **${r.goal}**${r.target ? ` (target ${r.target}${r.unit ? ' ' + r.unit : ''})` : ''}. Tell me as you make progress.`;
+    case 'update_goal': return `**${r.goal}**: ${r.target ? `${r.progress} of ${r.target}${r.unit ? ' ' + r.unit : ''}` : ''} (${r.pct}%).${r.pct >= 100 ? ' 🎉 Goal reached!' : ''}`;
+    case 'goals_summary': return r.goals.length ? `Your goals:\n\n${r.goals.map((g) => `- **${g.goal}**: ${g.pct}%`).join('\n')}` : 'No goals yet. Say “new goal read 12 books”.';
+    case 'log_money': return r.kind === 'income' ? `Logged ${r.amount} coming in${r.note ? ` from ${r.note}` : ''}.` : `Logged ${r.amount}${r.note ? ` on ${r.note}` : ''} (${r.category}). This month: ${r.spent} spent${r.left != null ? `, ${r.left} left` : ''}.${r.over ? ' ⚠️ You’re over your budget.' : ''}`;
+    case 'budget_summary': return `This month you’ve spent **${r.spent}**${r.income !== '$0.00' ? ` and received ${r.income}` : ''}.${r.budget ? ` Budget ${r.budget}: ${r.over ? 'you’re over it' : `${r.left} left`}.` : ''}${r.top.length ? `\n\nBiggest: ${r.top.join(', ')}.` : ''}`;
+    case 'set_budget': return `Monthly budget set to ${r.budget}.`;
+    case 'stopwatch': return { start: `Stopwatch started.`, stop: `Stopwatch stopped at ${r.spoken}.`, lap: `Lap ${r.laps}: ${r.time}.`, reset: 'Stopwatch reset.', check: r.running ? `The stopwatch is at ${r.spoken}.` : `The stopwatch is stopped at ${r.spoken}.` }[r.action || 'check'];
+    case 'create_automation': return `Automation set: **${r.when}** I’ll run “${r.command}”. It runs while JARVIS is open; you can see, pause or delete it in Planner → Automations.`;
+    case 'take_screenshot': return `Screenshot saved to your Desktop: **${r.name}**.`;
+    case 'create_folder': return `Made the folder **${r.name}**.`;
+    case 'rename_file': return `Renamed **${r.from}** to **${r.name}**.`;
+    case 'read_clipboard': return `Your clipboard says:\n\n> ${r.text.slice(0, 600).replace(/\n/g, '\n> ')}${r.chars > 600 ? '\n\n_(shortened)_' : ''}\n\nWant me to summarize, translate or explain it?`;
+    case 'copy_to_clipboard': return 'Copied. Paste it anywhere.';
+    case 'generate_image': return `Here’s your picture: “${r.prompt}”.`;
+    case 'set_mode': return r.mode === 'assistant' ? 'Back to normal mode.' : r.mode === 'translator' ? `Translator mode is on: I’ll translate everything you say into ${r.lang}. Say “normal mode” to stop.` : `${r.label} mode is on. Say “normal mode” to go back.`;
     case 'go_home': return `${r.app} is open with directions home (${r.mode}).${r.mode === 'driving' ? ' Drive safe!' : ''} 🏠`;
     case 'set_home_address': return `Saved your home address. It stays on this device. Say “take me home” any time.`;
     case 'morning_briefing': return r.md;

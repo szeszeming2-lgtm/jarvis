@@ -112,6 +112,7 @@ export async function listen(mode = 'command') {
   await call('listen.start', {
     mode: mode === 'bargein' ? 'wake' : mode, locale: settings.voice.locale, offlineOnly: !!settings.voice.offlineOnly,
     wakeWords: ww, silenceMs: Number(settings.voice.silenceMs) || 1400,
+    gate: { low: 0.012, normal: 0.003, high: 0 }[settings.voice.sensitivity || 'normal'] ?? 0.003, // quiet sounds below this are ignored
   });
   voice.listening = true;
   voice.mode = mode;

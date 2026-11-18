@@ -100,13 +100,18 @@ function build(m) {
       const d = h('details', { class: 'reasoning' }, h('summary', { text: m.pending || !m.content ? 'Reasoning…' : 'Reasoning' }), h('div', { text: m.thinking }));
       body.append(d);
     }
-    if (m.pending && !m.content) body.append(h('div', { class: 'thinking-dots', 'aria-label': 'Thinking' }, h('i'), h('i'), h('i')), m.loading ? h('div', { class: 'muted', style: { fontSize: '12.5px' }, text: m.loading }) : null);
+    // Research / agent team: show each finished step with a tick.
+    if (m.steps?.length) body.append(h('ol', { class: 'deep-steps' }, ...m.steps.map((s, i) => h('li', { class: m.pending && i === m.steps.length - 1 ? 'now' : 'done' }, iconNode(m.pending && i === m.steps.length - 1 ? 'refresh' : 'check'), h('span', { text: s })))));
+    if (m.pending && !m.content) body.append(h('div', { class: 'thinking-dots', 'aria-label': 'Thinking' }, h('i'), h('i'), h('i')), m.loading && !m.steps?.length ? h('div', { class: 'muted', style: { fontSize: '12.5px' }, text: m.loading }) : null);
     else {
       const c = h('div');
       c.innerHTML = md(m.content); // markdown.js escapes all model text
       if (m.streaming) c.append(h('span', { class: 'cursor' }));
       body.append(c);
     }
+    if (m.cards?.length) body.append(flashcards(m.cards));
+    if (m.agentNotes?.length) body.append(h('details', { class: 'reasoning agent-notes' }, h('summary', { text: `How the team worked (${m.agentNotes.map((a) => a.name).join(' → ')})` }),
+      ...m.agentNotes.map((a) => { const d = h('div', { class: 'agent-note' }, h('b', {}, iconNode(a.icon), ' ', a.name)); const c = h('div'); c.innerHTML = md(a.text); d.append(c); return d; })));
     if (m.buttons?.length) body.append(h('div', { class: 'msg-buttons' }, ...m.buttons.map((b, i) => h('button', { class: 'btn btn-sm' + (i === 0 ? ' btn-primary' : ''), type: 'button', text: b.label, onclick: () => pressButton(b) }))));
     if (m.stopped) body.append(h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '6px' }, text: 'Stopped.' }));
     const meta = h('div', { class: 'msg-meta' },
@@ -127,6 +132,10 @@ function toolRow(m) {
     h('span', { class: 'chip ' + cls, title: m.display }, iconNode(ic), h('span', { text: m.display || m.tool_name })));
   if (m.undo) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Undo', onclick: () => assistant.undo(m) }));
   if (m.reminderId && !isNative) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', title: 'Save it to your phone or computer calendar so it reminds you even when JARVIS is closed', onclick: () => import('../reminders.js').then((r) => r.exportICS(m.reminderId)).catch((e) => toast(e.message, { bad: true })) }, iconNode('download'), /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'Add to iPhone Calendar' : 'Add to Calendar'));
+  if (m.picture) row.append(h('div', { class: 'made-picture' }, h('img', { src: m.picture, alt: 'Picture made by JARVIS' }),
+    h('div', { class: 'flex' },
+      h('button', { class: 'btn btn-sm', type: 'button', onclick: async () => { const r = await call('file.save', { name: 'JARVIS-picture.png', base64: m.picture.split(',')[1] }).catch((e) => toast(e.message, { bad: true })); if (r?.ok) toast('Picture saved'); } }, iconNode('download'), 'Save'),
+      h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: async () => { const img = new Image(); img.src = m.picture; await img.decode(); (await import('./imageedit.js')).openEditor(img); } }, iconNode('edit'), 'Edit'))));
   if (m.reveal) row.append(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Show in Finder', onclick: () => call('tool.reveal', { path: m.reveal }).catch((e) => toast(e.message, { bad: true })) }));
   if (m.files?.length) {
     const list = h('div', { style: { width: '100%', display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' } });
@@ -167,6 +176,21 @@ function errorCard(m) {
   return h('div', { class: 'card glass notice-card', dataset: { id: m.id } },
     h('span', { class: 'ic' }, iconNode('alert')),
     h('div', { class: 'grow' }, h('div', { text: m.error, style: { fontSize: '13.5px', lineHeight: 1.5 } }), actions));
+}
+
+/** A flip-card deck: tap to turn over, arrows to move. */
+function flashcards(cards) {
+  let i = 0, flipped = false, order = cards.map((_, k) => k);
+  const face = h('div', { class: 'fc-face' });
+  const count = h('span', { class: 'mono muted' });
+  const card = h('button', { class: 'fc-card', type: 'button', 'aria-live': 'polite', onclick: () => { flipped = !flipped; draw(); } }, face);
+  const draw = () => { const c = cards[order[i]]; card.classList.toggle('back', flipped); face.replaceChildren(h('small', { text: flipped ? 'Answer' : 'Question' }), h('div', { text: flipped ? c.a : c.q })); count.textContent = `${i + 1} / ${cards.length}`; };
+  const go = (d) => { i = (i + d + cards.length) % cards.length; flipped = false; draw(); };
+  draw();
+  return h('div', { class: 'fc' }, card, h('div', { class: 'flex', style: { justifyContent: 'space-between', marginTop: '8px' } },
+    h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: '← Back', onclick: () => go(-1) }), count,
+    h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Shuffle', onclick: () => { order = order.sort(() => Math.random() - 0.5); i = 0; flipped = false; draw(); } }),
+    h('button', { class: 'btn btn-sm', type: 'button', text: 'Next →', onclick: () => go(1) })));
 }
 
 async function pressButton(b) {

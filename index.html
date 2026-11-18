@@ -44,6 +44,8 @@
       </label>
       <nav class="session-list" id="sessionList" aria-label="Conversation history"></nav>
       <div class="side-nav">
+        <button class="nav-btn" type="button" data-open="projects" data-icon="folder">Projects</button>
+        <button class="nav-btn" type="button" data-open="planner" data-icon="target">Planner</button>
         <button class="nav-btn" type="button" data-open="lists" data-icon="list">Lists</button>
         <button class="nav-btn" type="button" data-open="workout" data-icon="zap">Workouts</button>
         <button class="nav-btn" type="button" data-open="plugins" data-icon="puzzle">Plugins</button>
@@ -60,11 +62,16 @@
         <div class="title-wrap">
           <input class="session-title" id="sessionTitle" value="New conversation" aria-label="Conversation title" spellcheck="false">
         </div>
+        <button class="model-chip mode-chip" id="modeChip" type="button" title="AI mode" aria-label="AI mode">
+          <span class="ic" id="modeIcon" data-icon="sparkles"></span>
+          <span id="modeText">Assistant</span>
+        </button>
         <button class="model-chip" id="modelChip" type="button" title="Choose AI model">
           <span class="dot" id="modelDot"></span>
           <span id="modelChipText">Checking AI engine…</span>
           <span class="chev" data-icon="chevron"></span>
         </button>
+        <button class="icon-btn" id="searchBtn" type="button" title="Search everything (⌘K)" aria-label="Search everything" data-icon="search"></button>
         <button class="icon-btn" id="shareBtn" type="button" title="Share JARVIS" aria-label="Share JARVIS" data-icon="share"></button>
         <button class="icon-btn" id="speakToggle" type="button" title="Spoken replies" aria-label="Spoken replies" data-icon="speaker"></button>
         <button class="icon-btn" id="hudToggle" type="button" title="Show or hide status panel" aria-label="Show or hide status panel" data-icon="panel"></button>

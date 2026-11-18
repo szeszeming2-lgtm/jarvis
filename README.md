@@ -19,6 +19,8 @@ JARVIS is a free, private AI assistant. The AI runs on your own computer with [O
 
 **Link devices:** Settings → Link devices makes your phone and computer match (lists, people, reminders, plugins, memory, workouts, recent chats, settings). No account: one device makes a locked file, you AirDrop it, and type the code on the other.
 
+**Even more:** AI modes (study, developer, research…), deep research with sources, a team of AI agents, Projects with tasks and a knowledge map, search everything, a Planner (habits, goals, budget, stopwatch, voice notes, automations), flashcards, reading PDF/Word/Excel files, a picture editor, light mode and backup/restore. Settings → About & Help has the full list, with what each thing needs.
+
 **Every morning:** say “good morning” (or let it pop up after 7:30) for the weather and what you need to do today. **“Take me home”** opens directions home in Maps.
 
 Even without the AI download, the phone version does reminders (with **Add to iPhone Calendar**), shopping and to-do lists, notes, texts and calls to saved people, opening your apps (“open Spotify”), a system report, a unit converter, timers, weather, and maths.

@@ -155,14 +155,15 @@ export const TOOLS = [
       when: { type: 'string', description: 'When, in plain words exactly as the user said it: "in 20 minutes", "at 5:30 pm", "tomorrow at 9am", "friday at 3pm"' },
       text_me: { type: 'boolean', description: 'Also send the user a text message when it is due (only if they ask to be texted)' },
       call_me: { type: 'boolean', description: 'Call the user when it is due (only if they ask to be called or woken up)' },
+      repeat: { type: 'string', enum: ['daily', 'weekdays', 'weekly', 'monthly'], description: 'Only if the user says it should repeat (every day, every Monday…)' },
     }, ['text', 'when']),
     ask: (a) => ({ title: `Remind you: “${a.text}”`, detail: a.when }),
     run: async (a) => {
       if (a.call_me && !settings.profile?.phone?.trim()) throw new Error('Tell me your number first, so I know where to call: say “my number is +1 555 123 4567”.');
-      const r = await reminders.add(a.text, a.when, { textMe: !!a.text_me, callMe: !!a.call_me });
+      const r = await reminders.add(a.text, a.when, { textMe: !!a.text_me, callMe: !!a.call_me, repeat: a.repeat || '' });
       const callNote = a.call_me && !can('messages') ? 'Calls come from the JARVIS Mac app, so keep it running on your Mac. The reminder is here as well.' : '';
       const texts = can('messages') && !a.call_me && !!(a.text_me || (settings.reminders?.textMe !== false && settings.profile?.phone));
-      return { id: r.id, text: r.text, when: r.human, due: new Date(r.due).toISOString(), inSystemReminders: !!r.systemId, callNote, texts };
+      return { id: r.id, text: r.text, when: r.human, due: new Date(r.due).toISOString(), inSystemReminders: !!r.systemId, callNote, texts, repeat: r.repeat || '' };
     },
     done: (r) => `Reminder ${r.when}` },
   { name: 'list_reminders', icon: 'bell', group: 'reminders',
@@ -264,6 +265,101 @@ export const TOOLS = [
   { name: 'set_home_city', icon: 'home', group: 'weather',
     ...s('Remember the user\'s home city for weather.', { place: { type: 'string' } }, ['place']),
     run: async (a) => weather.setHome(a.place), done: (r) => `Home city: ${r.name}` },
+  { name: 'create_project', icon: 'folder', group: 'projects',
+    ...s('Create a project (a folder for notes, tasks, documents and chats). Optional goal.', { name: { type: 'string' }, goal: { type: 'string' } }, ['name']),
+    run: async (a) => { const pj = await import('./projects.js'); const p = pj.create(a.name, { goal: a.goal || '' }); return { id: p.id, name: p.name }; },
+    done: (r) => `Project: ${r.name}` },
+  { name: 'add_project_task', icon: 'list', group: 'projects',
+    ...s('Add one or more tasks to a project (separate several with ";").', { project: { type: 'string' }, task: { type: 'string' } }, ['project', 'task']),
+    run: async (a) => { const pj = await import('./projects.js'); let p = pj.find(a.project); if (!p) p = pj.create(a.project); const added = pj.addTask(p.id, a.task); const pr = pj.progress(p); return { project: p.name, added: added.map((t) => t.text), done: pr.done, total: pr.total }; },
+    done: (r) => `${r.added.length} task${r.added.length === 1 ? '' : 's'} → ${r.project}` },
+  { name: 'complete_project_task', icon: 'check', group: 'projects',
+    ...s('Tick off a task in a project when the user says it is done.', { project: { type: 'string' }, task: { type: 'string' } }, ['project', 'task']),
+    run: async (a) => { const pj = await import('./projects.js'); const p = pj.find(a.project); if (!p) throw new Error(`There’s no project called ${a.project}.`); const t = pj.completeTask(p.id, a.task); if (!t) throw new Error(`I couldn’t find “${a.task}” in ${p.name}.`); const pr = pj.progress(p); return { project: p.name, task: t.text, pct: pr.pct, done: pr.done, total: pr.total }; },
+    done: (r) => `Done: ${r.task}` },
+  { name: 'project_status', icon: 'folder', group: 'projects',
+    ...s('How a project is going (progress and open tasks), or a list of all projects when no name is given.', { project: { type: 'string' } }),
+    run: async (a) => {
+      const pj = await import('./projects.js');
+      if (!a.project) return { projects: pj.all().map((p) => ({ name: p.name, ...pj.progress(p) })) };
+      const p = pj.find(a.project); if (!p) throw new Error(`There’s no project called ${a.project}.`);
+      return { project: p.name, goal: p.goal, ...pj.progress(p), open: p.tasks.filter((t) => !t.done).map((t) => t.text) };
+    },
+    done: (r) => (r.projects ? `${r.projects.length} projects` : `${r.project}: ${r.pct}%`) },
+  { name: 'generate_image', icon: 'image', group: 'look', needs: 'imageGen',
+    ...s('Make a picture from a description (Mac app, using Ollama\'s free FLUX.2 Klein picture model). Takes a minute or two.', { prompt: { type: 'string' } }, ['prompt']),
+    run: async (a) => {
+      const o = await import('./ollama.js');
+      if (o.engine.status === 'online' && !o.engine.models.some((m) => /^x\/(flux2-klein|z-image-turbo)/.test(m.name))) throw new Error('To make pictures I need Ollama’s free picture model, FLUX.2 Klein (5.7 GB, downloaded once). Say “download the picture model”.');
+      const r = await call('image.generate', { prompt: a.prompt, model: o.engine.models.some((m) => /^x\/z-image-turbo/.test(m.name)) && !o.engine.models.some((m) => /^x\/flux2-klein/.test(m.name)) ? 'x/z-image-turbo' : 'x/flux2-klein' });
+      return { prompt: a.prompt, picture: `data:${r.type};base64,${r.image}` };
+    },
+    done: () => 'Picture made' },
+  { name: 'take_screenshot', icon: 'display', group: 'files', needs: 'screenshot', category: 'screen',
+    ...s('Take a screenshot of the screen and save it to the Desktop.', {}),
+    run: async () => call('screenshot.save', {}), reveal: (r) => r.path, done: (r) => `Saved ${r.name}` },
+  { name: 'create_folder', icon: 'folder', group: 'files', needs: 'files', category: 'writeFiles',
+    ...s('Make a new folder. "in": Desktop, Documents, Downloads or a path inside the home folder (default Desktop).', { name: { type: 'string' }, in: { type: 'string' } }, ['name']),
+    ask: (a) => ({ title: `Make a folder “${a.name}”`, detail: `In ${a.in || 'Desktop'}` }),
+    run: async (a) => call('tool.create_folder', { name: a.name, in: a.in || '' }), reveal: (r) => r.path, done: (r) => `Folder ${r.name}` },
+  { name: 'rename_file', icon: 'edit', group: 'files', needs: 'files', category: 'writeFiles', alwaysAsk: true,
+    ...s('Rename a file or folder. "file" is its full path, or its name (found with Spotlight).', { file: { type: 'string' }, new_name: { type: 'string' } }, ['file', 'new_name']),
+    prepare: async (a) => {
+      if (/^[~/]/.test(a.file)) return { path: a.file };
+      const f = await call('tool.find_files', { query: a.file, limit: 5 });
+      const exact = (f.files || []).find((x) => x.name.toLowerCase() === String(a.file).toLowerCase()) || (f.files || [])[0];
+      if (!exact) throw new Error(`I couldn’t find “${a.file}”.`);
+      return { path: exact.path };
+    },
+    ask: (a, p) => ({ title: `Rename to “${a.new_name}”`, detail: p.path }),
+    run: async (a, p) => call('tool.rename', { path: p.path, name: a.new_name }), reveal: (r) => r.path, done: (r) => `${r.from} → ${r.name}` },
+  { name: 'read_clipboard', icon: 'copy', group: 'basics', needs: 'clipboard', category: 'screen',
+    ...s('Read the text the user copied (their clipboard), e.g. to summarize, translate or explain it.', {}),
+    run: async () => { const r = await call('clipboard.read', {}); if (!r?.text?.trim()) throw new Error('Your clipboard has no text right now.'); return { text: r.text.slice(0, 12000), chars: r.text.length }; },
+    done: (r) => `Read ${r.chars} characters` },
+  { name: 'copy_to_clipboard', icon: 'copy', group: 'basics',
+    ...s('Put text on the clipboard so the user can paste it.', { text: { type: 'string' } }, ['text']),
+    run: async (a) => { await call('clipboard.write', { text: a.text }); return { chars: a.text.length }; }, done: () => 'Copied' },
+  { name: 'create_automation', icon: 'clock', group: 'planner',
+    ...s('Schedule something to run again and again. "every": day, weekday, week, month, hour, morning, evening or a weekday name; "at": a time like 8am; "command": what to do, in the user\'s words (e.g. "open Spotify", "/workday", "tell me the weather").', { every: { type: 'string' }, at: { type: 'string' }, command: { type: 'string' } }, ['every', 'command']),
+    run: async (a) => { const A = await import('./automations.js'); const r = A.fromWords(a); return { id: r.id, when: r.when, command: a.command }; },
+    done: (r) => `Automation: ${r.when}` },
+  { name: 'add_habit', icon: 'target', group: 'planner',
+    ...s('Start tracking a daily habit.', { habit: { type: 'string' } }, ['habit']),
+    run: async (a) => { const P = await import('./planner.js'); const hb = P.addHabit(a.habit); return { habit: hb.name }; }, done: (r) => `Habit: ${r.habit}` },
+  { name: 'check_habit', icon: 'check', group: 'planner',
+    ...s('Tick off a habit for today when the user says they did it.', { habit: { type: 'string' } }, ['habit']),
+    run: async (a) => { const P = await import('./planner.js'); const hb = P.checkHabit(a.habit, true); return { habit: hb.name, streak: hb.streak }; }, done: (r) => `${r.habit} ✓` },
+  { name: 'habits_summary', icon: 'target', group: 'planner',
+    ...s('The user\'s habits: which are done today and their streaks.', {}),
+    run: async () => { const P = await import('./planner.js'); const t = P.dayKey(); return { habits: P.all().habits.map((hb) => ({ name: hb.name, today: !!hb.days[t], streak: P.streak(hb) })) }; }, done: (r) => `${r.habits.length} habits` },
+  { name: 'add_goal', icon: 'target', group: 'planner',
+    ...s('Set a goal. "target" and "unit" when it is countable (12 books, 500 dollars).', { goal: { type: 'string' }, target: { type: 'number' }, unit: { type: 'string' } }, ['goal']),
+    run: async (a) => { const P = await import('./planner.js'); const m = !a.target && String(a.goal).match(/(\d+(?:\.\d+)?)\s*([\p{L}%$€£]+)?/u); const g = P.addGoal({ title: a.goal, target: a.target || (m ? +m[1] : 0), unit: a.unit || m?.[2] || '' }); return { goal: g.title, target: g.target, unit: g.unit }; }, done: (r) => `Goal: ${r.goal}` },
+  { name: 'update_goal', icon: 'target', group: 'planner',
+    ...s('Add progress to a goal (amount), or set it (set=true).', { goal: { type: 'string' }, amount: { type: 'number' }, set: { type: 'boolean' } }, ['goal', 'amount']),
+    run: async (a) => { const P = await import('./planner.js'); const g = P.updateGoal(a.goal, a.amount, { set: !!a.set }); return { goal: g.title, progress: g.progress, target: g.target, unit: g.unit, pct: g.pct }; }, done: (r) => `${r.goal}: ${r.pct}%` },
+  { name: 'goals_summary', icon: 'target', group: 'planner',
+    ...s('The user\'s goals and how far along each one is.', {}),
+    run: async () => { const P = await import('./planner.js'); return { goals: P.all().goals.map((g) => ({ goal: g.title, progress: g.progress, target: g.target, unit: g.unit, pct: P.goalPct(g) })) }; }, done: (r) => `${r.goals.length} goals` },
+  { name: 'log_money', icon: 'calculator', group: 'planner',
+    ...s('Record money spent (expense) or received (income) in the budget.', { amount: { type: 'number' }, note: { type: 'string' }, kind: { type: 'string', enum: ['expense', 'income'] } }, ['amount']),
+    run: async (a) => { const P = await import('./planner.js'); const e = P.logMoney({ amount: a.amount, note: a.note || '', kind: a.kind || 'expense' }); return { amount: P.money(e.amount), note: e.note, kind: e.kind, category: e.category, spent: P.money(e.month.spent), left: e.month.left != null ? P.money(e.month.left) : null, over: e.month.over }; },
+    done: (r) => `${r.kind === 'income' ? '+' : '−'}${r.amount} ${r.note}` },
+  { name: 'budget_summary', icon: 'calculator', group: 'planner',
+    ...s('This month\'s spending, income and budget.', {}),
+    run: async () => { const P = await import('./planner.js'); const m = P.monthSummary(); return { spent: P.money(m.spent), income: P.money(m.income), left: m.left != null ? P.money(m.left) : null, budget: m.budget ? P.money(m.budget) : null, over: m.over, top: m.byCategory.slice(0, 4).map(([k, v]) => `${k} ${P.money(v)}`) }; }, done: (r) => `Spent ${r.spent}` },
+  { name: 'set_budget', icon: 'calculator', group: 'planner',
+    ...s('Set the monthly spending budget.', { amount: { type: 'number' } }, ['amount']),
+    run: async (a) => { const P = await import('./planner.js'); P.setMonthlyBudget(a.amount); return { budget: P.money(a.amount) }; }, done: (r) => `Budget ${r.budget}` },
+  { name: 'stopwatch', icon: 'clock', group: 'planner',
+    ...s('Control the stopwatch: start, stop, lap, reset or check.', { action: { type: 'string', enum: ['start', 'stop', 'lap', 'reset', 'check'] } }, ['action']),
+    run: async (a) => { const P = await import('./planner.js'); const st = { start: P.startStopwatch, stop: P.stopStopwatch, lap: P.lap, reset: P.resetStopwatch, check: P.stopwatch }[a.action || 'check'](); return { action: a.action, running: st.running, time: P.fmtMs(st.ms), spoken: P.spokenTime(st.ms), laps: st.laps.length }; },
+    done: (r) => `Stopwatch ${r.time}` },
+  { name: 'set_mode', icon: 'sparkles', group: 'basics',
+    ...s('Switch the AI mode: assistant (normal), study, developer, research, creative, professional, teacher, translator, troubleshoot or planning. For translator, "language" is the target language.', { mode: { type: 'string', enum: ['assistant', 'study', 'developer', 'research', 'creative', 'professional', 'teacher', 'translator', 'troubleshoot', 'planning'] }, language: { type: 'string' } }, ['mode']),
+    run: async (a) => { const m = await import('./modes.js'); return m.setMode(m.find(a.mode) || a.mode, a.language); },
+    done: (r) => `${r.label} mode` },
   { name: 'go_home', icon: 'home', group: 'home',
     ...s('Directions home from where the user is now (opens Maps). "mode": drive, walk, transit or cycle.', { mode: { type: 'string', enum: ['drive', 'walk', 'transit', 'cycle'] } }),
     run: async (a) => {
@@ -322,6 +418,8 @@ export const GROUPS = {
   convert: { label: 'Unit converter', icon: 'calculator' },
   status: { label: 'System report', icon: 'cpu' },
   home: { label: 'Take me home (directions)', icon: 'home' },
+  projects: { label: 'Projects (notes, tasks, documents)', icon: 'folder' },
+  planner: { label: 'Planner (habits, goals, budget)', icon: 'target' },
   briefing: { label: 'Morning briefing', icon: 'coffee' },
 };
 

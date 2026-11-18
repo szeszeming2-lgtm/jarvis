@@ -60,7 +60,7 @@ registerTab('sync', (body) => {
       row('', '', h('button', { class: 'btn btn-primary', type: 'button', onclick: send }, iconNode('upload'), 'Send everything'))), out),
     section('Receive from another device', 'Got a JARVIS link file? Open it here.', h('button', { class: 'btn', type: 'button', onclick: receive }, iconNode('download'), 'Receive (choose the file)')),
     section('What’s shared', '', h('ul', { class: 'muted', style: { margin: 0, paddingLeft: '18px', lineHeight: 1.7, fontSize: '13px' } },
-      h('li', { text: 'Lists, people, reminders, plugins, memories, workouts, recent chats.' }),
+      h('li', { text: 'Lists, people, reminders, plugins, memories, workouts, projects, habits, goals, budget, recent chats.' }),
       h('li', { text: 'Your name, number, home, city, briefing and reply settings, theme.' }),
       h('li', { text: 'Not shared: the AI model, voice and permissions (each device keeps its own).' }))),
   );

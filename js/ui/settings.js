@@ -79,10 +79,13 @@ registerTab('voice', (body) => {
         row('Offline only', 'Never use online speech recognition, even if on-device is unavailable.', toggle(settings.voice.offlineOnly, (v) => set('voice.offlineOnly', v), 'Offline only')),
         row('Pause before sending', 'How long to wait after you stop talking.', range(settings.voice.silenceMs, 700, 3000, 100, (v) => set('voice.silenceMs', v), (v) => (v / 1000).toFixed(1) + ' s', 'Silence timeout')),
         row('Keep the conversation going', 'After JARVIS answers out loud, it listens again automatically.', toggle(settings.voice.continuous, (v) => set('voice.continuous', v), 'Continuous conversation')),
+        row('Microphone sensitivity', 'Lower it in a noisy room so background sound is ignored.', seg(settings.voice.sensitivity || 'normal', [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']], (v) => set('voice.sensitivity', v))),
+        row('Push to talk', 'Hold the microphone button (or the Space bar when you’re not typing) while you speak; let go to send.', toggle(settings.voice.pushToTalk !== false, (v) => set('voice.pushToTalk', v), 'Push to talk')),
       )),
       section('Wake word', can('wake') ? 'Optional. While JARVIS is open, say the wake word to start talking. Your microphone stays on (macOS shows an orange dot) but audio never leaves this device.' : 'Needs the JARVIS desktop app.', rows(
         row('Listen for the wake word', '', toggle(settings.voice.wake, (v) => { set('voice.wake', v); bus.emit('wake.changed'); }, 'Wake word')),
-        row('Wake word', 'One or two easy words. Default is the assistant’s name.', text(settings.voice.wakeWord, (v) => { set('voice.wakeWord', v.trim().toLowerCase() || settings.assistantName.toLowerCase()); }, { width: '180px', label: 'Wake word' })),
+        row('Wake word', 'One or two easy words. Default is the assistant’s name; “Hey JARVIS” works too.', text(settings.voice.wakeWord, (v) => { set('voice.wakeWord', v.trim().toLowerCase() || settings.assistantName.toLowerCase()); }, { width: '180px', label: 'Wake word' })),
+        row('Answer when called', 'What JARVIS says when you call its name, before listening. Leave empty for just a chime.', text(settings.voice.wakeReply ?? 'Yes?', (v) => set('voice.wakeReply', v.trim()), { width: '180px', placeholder: 'Yes?', label: 'Wake reply' })),
         row('Interrupt by voice (experimental)', 'Say “stop” while JARVIS is talking. Works best with headphones.', toggle(settings.voice.bargeIn, (v) => set('voice.bargeIn', v), 'Interrupt by voice')),
       )),
     );
@@ -112,7 +115,11 @@ registerTab('appearance', (body) => {
       row('Visualizer style', 'The animated core in the middle of the screen.', seg(settings.appearance.visualizer, [['reactor', 'Reactor'], ['orb', 'Orb'], ['wave', 'Wave']], (v) => set('appearance.visualizer', v))),
       row('Animation', 'Reduce for older computers or to save battery.', seg(settings.appearance.motion, [['full', 'Full'], ['reduced', 'Reduced'], ['off', 'Minimal']], (v) => { set('appearance.motion', v); applyAppearance(); })),
       row('Glass effect', 'Blurred glass panels. Lower is faster on older computers.', seg(settings.appearance.glass, [['full', 'Full'], ['low', 'Light'], ['off', 'Solid']], (v) => { set('appearance.glass', v); applyAppearance(); })),
-      row('Text size', '', range(settings.appearance.fontScale, 0.85, 1.3, 0.05, (v) => { set('appearance.fontScale', v); applyAppearance(); }, (v) => Math.round(v * 100) + '%', 'Text size')),
+      row('Text size', '', range(settings.appearance.fontScale, 0.85, 1.6, 0.05, (v) => { set('appearance.fontScale', v); applyAppearance(); }, (v) => Math.round(v * 100) + '%', 'Text size')),
+      row('High contrast', 'Brighter text and stronger outlines. Easier to read.', toggle(!!settings.appearance.highContrast, (v) => { set('appearance.highContrast', v); applyAppearance(); }, 'High contrast')),
+      can('orb') ? row('Floating JARVIS orb', 'A small glowing orb that stays above every window. Click it to talk; drag it anywhere.', toggle(!!settings.appearance.orb, (v) => { set('appearance.orb', v); call('app.setWindowOptions', { orb: v }).catch(() => {}); }, 'Floating orb')) : null,
+      can('orb') ? row('Always on top', 'Keep the JARVIS window above other windows.', toggle(!!settings.appearance.onTop, (v) => { set('appearance.onTop', v); call('app.setWindowOptions', { onTop: v }).catch(() => {}); }, 'Always on top')) : null,
+      row('Lightweight mode', 'For older or slower devices: no animations, no glass blur, a simpler core. Saves battery.', toggle(settings.appearance.motion === 'off' && settings.appearance.glass === 'off', (v) => { set('appearance.motion', v ? 'off' : 'full'); set('appearance.glass', v ? 'off' : 'full'); set('appearance.visualizer', v ? 'orb' : 'reactor'); applyAppearance(); refresh(); }, 'Lightweight mode')),
     )),
   );
 });
@@ -227,8 +234,8 @@ registerTab('privacy', (body) => {
     section('Your data', '', rows(
       row('Stored in', 'Plain JSON files you can back up or delete.', h('div', { class: 'flex' }, where, isNative ? h('button', { class: 'btn btn-sm', type: 'button', text: 'Show in Finder', onclick: () => call('store.reveal') }) : null)),
       row('What is stored', '', countText),
-      row('Export everything', 'Save conversations, memories, skills and settings to one file.', h('button', { class: 'btn btn-sm', type: 'button', onclick: exportAll }, iconNode('download'), 'Export')),
-      row('Import a backup', 'Adds conversations, memories and skills from an export file.', h('button', { class: 'btn btn-sm', type: 'button', onclick: importAll }, iconNode('upload'), 'Import')),
+      row('Back up everything', 'One file with all your chats, memories, plugins, lists, people, reminders, workouts, projects, planner and settings. Keep it somewhere safe.', h('button', { class: 'btn btn-sm', type: 'button', onclick: exportAll }, iconNode('download'), 'Back up')),
+      row('Restore a backup', 'Adds everything from a backup file. Nothing on this device is deleted.', h('button', { class: 'btn btn-sm', type: 'button', onclick: importAll }, iconNode('upload'), 'Restore')),
     )),
     section('Delete', 'These cannot be undone.', rows(
       row('Delete all conversations', '', h('button', { class: 'btn btn-sm btn-danger', type: 'button', text: 'Delete conversations', onclick: async () => { if (await dialog({ title: 'Delete all conversations?', text: 'Every conversation on this device will be permanently deleted.', okLabel: 'Delete', danger: true })) { await sessions.removeAll(); toast('Conversations deleted'); refresh(); } } })),
@@ -239,7 +246,9 @@ registerTab('privacy', (body) => {
 });
 
 async function exportAll() {
-  const data = { app: 'JARVIS', version: 1, exported: new Date().toISOString(), settings, memory: memory.all(), skills: skills.all(), conversations: await sessions.exportAll() };
+  // Everything: chats, memories, plugins, lists, people, reminders, workouts, projects, planner and settings.
+  const { collect } = await import('../sync.js');
+  const data = { app: 'JARVIS', version: 2, exported: new Date().toISOString(), bundle: await collect({ chats: 100000 }) };
   const name = `JARVIS-backup-${new Date().toISOString().slice(0, 10)}.json`;
   try { const r = await call('file.save', { name, content: JSON.stringify(data, null, 2) }); if (r?.ok) toast('Backup saved'); } catch (e) { toast(e.message, { bad: true }); }
 }
@@ -250,6 +259,14 @@ async function importAll() {
     if (!f) return;
     const data = JSON.parse(f.text);
     if (data.app !== 'JARVIS') throw new Error('That is not a JARVIS backup file.');
+    if (data.version === 2 && data.bundle) {
+      const sync = await import('../sync.js');
+      if (!(await dialog({ title: 'Restore this backup?', text: `From ${new Date(data.exported).toLocaleString()}. It adds everything that isn’t on this device yet and updates your settings. Nothing here is deleted.`, okLabel: 'Restore' }))) return;
+      const counts = await sync.apply(data.bundle);
+      toast(sync.describe(counts), { ms: 6000 });
+      setTimeout(() => location.reload(), 1500);
+      return;
+    }
     let n = 0;
     for (const c of data.conversations || []) {
       if (!c?.id || !Array.isArray(c.messages)) continue;
@@ -292,6 +309,7 @@ registerTab('about', (body) => {
       row('Link', '', h('div', { class: 'flex' }, h('span', { class: 'mono selectable', text: 'szeszeming2-lgtm.github.io/jarvis' }),
         h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => import('./share.js').then((m) => m.shareApp()) }, iconNode('share'), 'Share'))))),
     section('This copy', '', sys),
+    featureList(),
     section('Help', '', rows(
       row('Something not working?', 'Most problems are fixed by making sure Ollama is running (look for the llama icon in your menu bar) and that a model is installed.', h('button', { class: 'btn btn-sm', type: 'button', text: 'AI Models', onclick: () => import('./sheets.js').then((m) => m.show('models')) })),
       row('Things to try', '“open Notes” · “set a timer for 5 minutes” · “find my PDFs about taxes” · “organize my Downloads” · “remember that I prefer metric units” · “/translate Spanish: good morning”', null, { stack: true }),
@@ -299,5 +317,18 @@ registerTab('about', (body) => {
     )),
   );
 });
+
+/** Honest feature list: what works here, and what each feature needs. */
+function featureList() {
+  const box = h('div');
+  import('../features.js').then(({ FEATURES, NOT_YET }) => {
+    const here = isNative ? 'mac' : 'web';
+    box.append(...FEATURES.map(([group, items]) => h('div', { class: 'feat-group' }, h('div', { class: 'pop-label', text: group }),
+      h('ul', { class: 'feat-list' }, ...items.map(([name, where, needs]) => h('li', { class: where === 'all' || where === here ? '' : 'other' },
+        iconNode(where === 'all' || where === here ? 'check' : 'info'), h('span', {}, name, needs ? h('small', { text: ` — needs ${needs}` }) : null, where !== 'all' && where !== here ? h('small', { text: where === 'mac' ? ' — in the Mac app' : ' — on phones and in browsers' }) : null)))))),
+    h('div', { class: 'feat-group' }, h('div', { class: 'pop-label', text: 'Not built yet (honest list)' }), h('ul', { class: 'feat-list' }, ...NOT_YET.map((t) => h('li', { class: 'other' }, iconNode('info'), h('span', { text: t }))))));
+  });
+  return section('What JARVIS can do', 'Everything ticked works on this device today, for free. Some things need the internet, a one-time download or the Mac app, as noted.', box);
+}
 
 export { fmtBytes, timeAgo };

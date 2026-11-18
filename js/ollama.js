@@ -27,14 +27,14 @@ function req(path, method = 'GET', body) {
 async function detectPhone() {
   engine.provider = 'phone';
   const s = await phone.support();
-  engine.version = 'WebLLM';
+  engine.version = s.wasm ? 'transformers.js (processor)' : 'WebLLM';
   if (!s.ok) { engine.status = 'unsupported'; engine.lastError = s.reason; engine.models = []; bus.emit('engine', engine); return engine; }
   let keys = [];
   try { keys = await phone.downloadedKeys(); } catch (e) { engine.lastError = e.message; }
   engine.models = keys.map((k) => { const i = phone.info(k); const m = { name: k, label: i?.name || k, size: (i?.size || 0) * 1e9, details: { parameter_size: i?.name || '' }, capabilities: ['completion'], phone: true }; engine.caps.set(k, m); return m; });
   engine.running = phone.state.loadedId ? [{ name: phone.keyOf(phone.state.loadedId) }] : [];
   engine.status = 'online';
-  if (!settings.ai.model || !keys.includes(settings.ai.model)) { settings.ai.model = keys.includes('Llama-3.2-1B-Instruct') ? 'Llama-3.2-1B-Instruct' : keys[0] || ''; bus.emit('settings', { path: 'ai.model', value: settings.ai.model }); }
+  if (!settings.ai.model || !keys.includes(settings.ai.model)) { const pick = phone.models().find((m) => m.pick)?.key; settings.ai.model = keys.includes(pick) ? pick : keys[0] || ''; bus.emit('settings', { path: 'ai.model', value: settings.ai.model }); }
   bus.emit('engine', engine);
   return engine;
 }
@@ -132,7 +132,7 @@ export const modelInfo = (name = settings.ai.model) => engine.caps.get(name) || 
 export const hasCap = (cap, name = settings.ai.model) => (modelInfo(name)?.capabilities || []).includes(cap);
 
 export function contextLength(ramGB = window.__deviceRam || 8) {
-  if (isPhone()) return 3072; // phones: shorter prompts answer much faster
+  if (isPhone()) return phone.state.mode === 'wasm' ? 1536 : 3072; // phones: shorter prompts answer much faster (the processor backup even more so)
   const c = settings.ai.contextLength;
   if (c !== 'auto') return Number(c);
   const max = modelInfo()?.contextMax || 8192;

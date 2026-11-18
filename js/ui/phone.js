@@ -52,8 +52,9 @@ export function phonePanel({ compact = false } = {}) {
       'A small AI model downloads once (over Wi-Fi is best), then runs right here: free, private and offline. Small models are quick but simpler than big ones on a computer.')));
     if (!sup) { box.append(h('div', { class: 'muted', style: { fontSize: '13px' }, text: 'Checking this device…' })); return; }
     if (!sup.ok) { box.append(h('div', { class: 'callout warn' }, iconNode('alert'), h('div', { text: sup.reason }))); return; }
+    if (sup.wasm) box.append(h('div', { class: 'callout' }, iconNode('info'), h('div', { text: sup.reason })));
     const list = h('div', { class: 'list' });
-    for (const m of phone.PHONE_MODELS) {
+    for (const m of phone.models()) {
       const downloaded = have.includes(m.key);
       const active = ollama.isPhone() && settings.ai.model === m.key && downloaded;
       const busy = busyKey === m.key;
