@@ -50,7 +50,7 @@ const browser = {
       capabilities: {
         voiceOut: 'speechSynthesis' in window,
         voiceIn: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
-        voiceInOffline: false, wake: false, apps: /iPhone|iPad|iPod|Android/i.test(ua), files: false, system: false,
+        voiceInOffline: false, wake: false, apps: /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1), files: false, system: false,
         commands: false, hotkey: false, status: false, ollamaControl: false, documents: false, shortcuts: false,
       },
     };

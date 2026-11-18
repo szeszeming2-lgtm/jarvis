@@ -96,7 +96,14 @@ async function boot() {
   bus.emit('ready');
   // Web version: cache the interface so it opens offline (never inside the desktop app).
   if (!isNative && 'serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !/[?&]nosw\b/.test(location.search)) {
-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('offline cache', e));
+    // Pick up new versions right away: check on open and whenever the app comes back to the front,
+    // and reload once when a new version takes over.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded && !assistant.run.busy) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+    }).catch((e) => console.warn('offline cache', e));
   }
   call('app.ready', {}).catch(() => {});
 }
