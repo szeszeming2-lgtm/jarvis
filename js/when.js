@@ -38,7 +38,9 @@ export function parseWhen(text, now = new Date()) {
   const d = new Date(now);
   let dayWord = '';
   let dayOffset = 0;
-  if (/ day after tomorrow /.test(t)) { dayOffset = 2; dayWord = 'day after tomorrow'; }
+  const md = monthDay(t, now);
+  if (md) { dayOffset = Math.round((new Date(md.getFullYear(), md.getMonth(), md.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000); dayWord = md.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }); if (dayOffset === 0) dayOffset = 0.0001; }
+  else if (/ day after tomorrow /.test(t)) { dayOffset = 2; dayWord = 'day after tomorrow'; }
   else if (/ (tomorrow|tmrw|tmr) /.test(t)) { dayOffset = 1; dayWord = 'tomorrow'; }
   else if ((m = t.match(/ (?:on |next |this )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday) /))) {
     const target = DAYS.indexOf(m[1]);
@@ -66,7 +68,7 @@ export function parseWhen(text, now = new Date()) {
   if (hh > 23 || mm > 59) return null;
   // "tonight at 8", "this evening at 7": afternoon/evening hours.
   if (/ (tonight|evening|afternoon) /.test(t) && hh < 12 && !/ am /.test(t)) { hh += 12; explicit = true; }
-  d.setDate(d.getDate() + dayOffset);
+  d.setDate(d.getDate() + Math.round(dayOffset));
   d.setHours(hh, mm, 0, 0);
   if (!dayOffset && d <= now) {
     // "at 5" with no am/pm: use 5pm if 5am has passed today.
@@ -75,6 +77,23 @@ export function parseWhen(text, now = new Date()) {
   }
   const phrase = [dayWord, cm ? cm[0].trim() : ''].filter(Boolean).join(' ');
   return { date: d, phrase };
+}
+
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+/** "March 3", "3rd of March", "Dec 25", "12/25" (month/day), "the 14th" → the next such date (today counts). */
+export function monthDay(text, now = new Date()) {
+  const t = ' ' + String(text || '').toLowerCase().replace(/,/g, ' ') + ' ';
+  const mon = (w) => MONTHS.findIndex((m) => m.startsWith(w.slice(0, 3)));
+  let m, month = -1, day = 0;
+  if ((m = t.match(/ (jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? (\d{1,2})(?:st|nd|rd|th)? /))) { month = mon(m[1]); day = +m[2]; }
+  else if ((m = t.match(/ (\d{1,2})(?:st|nd|rd|th)? (?:of )?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? /))) { month = mon(m[2]); day = +m[1]; }
+  else if ((m = t.match(/ (\d{1,2})\/(\d{1,2})(?:\/\d{2,4})? /))) { month = +m[1] - 1; day = +m[2]; }
+  else if ((m = t.match(/ (?:on )?the (\d{1,2})(?:st|nd|rd|th) /))) { month = now.getMonth(); day = +m[1]; if (day < now.getDate()) month += 1; }
+  if (month < 0 || day < 1 || day > 31) return null;
+  let d = new Date(now.getFullYear(), month, day);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (d < today) d = new Date(now.getFullYear() + 1, month, day);
+  return d.getMonth() === ((month % 12) + 12) % 12 ? d : null;
 }
 
 export function describeWhen(date, now = new Date()) {

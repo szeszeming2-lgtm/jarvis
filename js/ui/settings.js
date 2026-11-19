@@ -21,6 +21,8 @@ registerTab('general', (body) => {
       row('Personality', 'The overall tone of replies.', select(settings.personality, [['classic', 'Classic butler (calm, witty)'], ['friendly', 'Friendly and casual'], ['concise', 'Brief and to the point'], ['custom', 'Only my instructions']], (v) => set('personality', v), 'Personality')),
       row('Your phone number', 'Optional, for “text me” and reminders by text. Stays on this device. Use your iMessage email if you prefer.', text(settings.profile?.phone, (v) => set('profile.phone', v.trim()), { width: '200px', placeholder: '+1 555 123 4567', label: 'Your phone number' })),
       row('Home city (weather)', settings.weather?.place ? `Now: ${settings.weather.place}. Only the city is sent to the free Open-Meteo weather service.` : 'For “what’s the weather?”. Only the city is sent to the free Open-Meteo weather service.', h('div', { class: 'flex' }, (() => { const i = text(settings.weather?.place?.split(',')[0] || '', () => {}, { width: '150px', placeholder: 'e.g. Toronto', label: 'Home city' }); i.addEventListener('change', async () => { if (!i.value.trim()) return; try { const g = await (await import('../weather.js')).setHome(i.value.trim()); toast(`Home city: ${g.name}`); } catch (e) { toast(e.message, { bad: true }); } }); return i; })(), select(settings.weather?.units || 'auto', [['auto', 'Auto'], ['c', '°C'], ['f', '°F']], (v) => set('weather.units', v), 'Temperature units'))),
+      row('Emergency contacts', 'Names of saved people to call or text in an emergency (say “emergency”), separated by commas.', text((settings.emergency?.contacts || []).join(', '), (v) => set('emergency.contacts', v.split(',').map((x) => x.trim()).filter(Boolean)), { width: '220px', placeholder: 'e.g. Mom, Sam', label: 'Emergency contacts' })),
+      row('Emergency number', 'Leave empty to use your region’s usual number.', text(settings.emergency?.number || '', (v) => set('emergency.number', v.trim()), { width: '120px', placeholder: 'auto', label: 'Emergency number' })),
       row('Home address', 'For “take me home”. Stays on this device and only goes to your Maps app when you ask for directions.', h('div', { class: 'flex wrap' },
         text(settings.profile?.home, (v) => set('profile.home', v.trim()), { width: '220px', placeholder: '12 Main St, Toronto', label: 'Home address' }),
         select(settings.profile?.travel || 'd', [['d', 'Drive'], ['w', 'Walk'], ['r', 'Transit'], ['c', 'Cycle']], (v) => set('profile.travel', v), 'How you usually travel'),
@@ -37,10 +39,15 @@ registerTab('general', (body) => {
       row('Morning briefing', '', toggle(settings.briefing?.on !== false, (v) => set('briefing.on', v), 'Morning briefing')),
       row('Time', 'Between now and 2 pm, once a day.', (() => { const i = h('input', { class: 'field', type: 'time', value: settings.briefing?.time || '07:30', 'aria-label': 'Briefing time', style: 'width:130px' }); i.addEventListener('change', () => { if (i.value) { set('briefing.time', i.value); if (i.value > new Date().toTimeString().slice(0, 5)) set('briefing.last', ''); } }); return i; })()),
       row('Read it out loud', '', toggle(settings.briefing?.speak !== false, (v) => set('briefing.speak', v), 'Speak the briefing')),
+      row('Evening summary', 'What you got done today and what’s tomorrow.', h('div', { class: 'flex' }, toggle(settings.briefing?.evening !== false, (v) => set('briefing.evening', v), 'Evening summary'), (() => { const i = h('input', { class: 'field', type: 'time', value: settings.briefing?.eveningTime || '21:00', 'aria-label': 'Evening summary time', style: { width: '130px' } }); i.addEventListener('change', () => { if (i.value) { set('briefing.eveningTime', i.value); if (i.value > new Date().toTimeString().slice(0, 5)) set('briefing.lastEvening', ''); } }); return i; })())),
       can('messages') ? row('Text it to me', settings.profile?.phone ? `To ${settings.profile.phone}.` : 'Add your phone number above first.', toggle(settings.briefing?.text !== false, (v) => set('briefing.text', v), 'Text the briefing')) : null,
       row('Try it', '', h('button', { class: 'btn btn-sm', type: 'button', text: 'Show my briefing now', onclick: async () => { closeSheet(); const b = await import('../briefing.js'); const r = await b.build(); const { announce } = await import('../assistant.js'); announce(r.md, { speak: settings.briefing?.speak !== false }); if (await b.textIt(r.text)) toast('Briefing texted to you.'); } })),
     )),
     section('Behaviour', '', rows(
+      row('Quiet hours', 'Only urgent things (reminders, calls) alert you during these hours; the rest waits in the bell.', h('div', { class: 'flex' }, toggle(!!settings.notify?.quiet, (v) => set('notify.quiet', v), 'Quiet hours'),
+        (() => { const i = h('input', { class: 'field', type: 'time', value: settings.notify?.quietStart || '22:00', 'aria-label': 'Quiet from', style: { width: '120px' } }); i.addEventListener('change', () => set('notify.quietStart', i.value)); return i; })(),
+        (() => { const i = h('input', { class: 'field', type: 'time', value: settings.notify?.quietEnd || '07:00', 'aria-label': 'Quiet until', style: { width: '120px' } }); i.addEventListener('change', () => set('notify.quietEnd', i.value)); return i; })())),
+      ...(can('macControl') ? [row('New app alerts', 'Tell me when an app runs on this Mac for the first time (a simple way to spot something you didn’t install).', toggle(!!settings.notify?.newApps, (v) => set('notify.newApps', v), 'New app alerts'))] : []),
       row('Instant commands', 'Handle simple requests (open apps, timers, maths, volume) right away without the AI. Faster and works offline with no model.', toggle(settings.instantCommands, (v) => set('instantCommands', v), 'Instant commands')),
       row('Smart conversation titles', 'Ask the AI to name each conversation. Uses a little extra processing.', toggle(settings.smartTitles, (v) => set('smartTitles', v), 'Smart titles')),
       can('phoneAlert') ? row('Make my iPhone ring for calls and texts', 'Texts you send yourself often arrive silently, so JARVIS also adds a quick iCloud reminder that alerts your iPhone (even when it’s locked). It removes it again after 15 minutes.', toggle(settings.profile?.phoneAlerts !== false, (v) => set('profile.phoneAlerts', v), 'Ring my iPhone')) : null,
@@ -75,6 +82,7 @@ registerTab('voice', (body) => {
       hi.platform === 'macos' ? callout('<b>Want a more natural voice?</b> macOS includes free high-quality voices. Open System Settings → Accessibility → Spoken Content → System voice → Manage Voices, and download a “Premium” or “Enhanced” voice (for example a British English one). Then pick it here.') : null,
       section('Listening', 'Speech recognition runs on this device. Nothing you say is sent anywhere.', rows(
         row('Microphone', 'Needed to talk to JARVIS.', h('div', { class: 'flex' }, st(perm.mic), perm.mic !== 'granted' ? h('button', { class: 'btn btn-sm', type: 'button', text: perm.mic === 'denied' ? 'Open Privacy Settings' : 'Allow', onclick: async () => { if (perm.mic === 'denied') call('tool.open_settings', { page: 'microphone' }); else { try { await call('listen.request'); } catch {} refresh(); } } }) : null)),
+        row('Microphone check', 'See which microphone JARVIS hears and how loud you are.', micCheck()),
         row('Speech recognition', perm.onDevice ? 'On-device recognition is available for this language.' : 'On-device recognition is not ready for this language. On a Mac, turn on Dictation once in System Settings → Keyboard to download it.', h('div', { class: 'flex' }, st(perm.speech), perm.onDevice ? h('span', { class: 'pill ok', text: 'Offline' }) : h('span', { class: 'pill warn', text: 'Needs download' }))),
         row('Language', 'The language you speak to JARVIS in.', select(settings.voice.locale, LOCALES, (v) => { set('voice.locale', v); refresh(); }, 'Speech language')),
         row('Offline only', 'Never use online speech recognition, even if on-device is unavailable.', toggle(settings.voice.offlineOnly, (v) => set('voice.offlineOnly', v), 'Offline only')),
@@ -93,6 +101,48 @@ registerTab('voice', (body) => {
     bus.emit('sheet.ready');
   })();
 });
+
+/** "Test microphone": the device in use and a live level meter for 6 seconds. */
+function micCheck() {
+  const out = h('span', { class: 'muted small' });
+  const bar = h('div', { class: 'progress', style: { width: '120px', display: 'none' } }, h('i'));
+  const btn = h('button', { class: 'btn btn-sm', type: 'button' }, iconNode('mic'), 'Test');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    let stream = null, ctx = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const track = stream.getAudioTracks()[0];
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+      ctx = new AudioContext();
+      const an = ctx.createAnalyser(); an.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(an);
+      const buf = new Float32Array(an.fftSize);
+      bar.style.display = '';
+      let peak = 0;
+      const end = Date.now() + 6000;
+      await new Promise((res) => {
+        const tick = () => {
+          an.getFloatTimeDomainData(buf);
+          let sum = 0; for (const v of buf) sum += v * v;
+          const lvl = Math.min(1, Math.sqrt(sum / buf.length) * 8);
+          peak = Math.max(peak, lvl);
+          bar.firstChild.style.width = Math.round(lvl * 100) + '%';
+          out.textContent = `Hearing: ${track.label || 'your microphone'}${devices.length > 1 ? ` (${devices.length} microphones found)` : ''}. Say something…`;
+          if (Date.now() < end) requestAnimationFrame(tick); else res();
+        };
+        tick();
+      });
+      out.textContent = peak > 0.08 ? `✓ ${track.label || 'Your microphone'} works.` : `I heard almost nothing from ${track.label || 'the microphone'}. Check it isn’t muted, or pick another input in your computer’s sound settings.`;
+    } catch (e) {
+      out.textContent = /NotAllowed|denied|Permission/i.test(e.name + e.message) ? 'Microphone access is blocked. Allow it and try again.' : /NotFound/i.test(e.name) ? 'No microphone found. Plug one in or check your sound settings.' : 'Couldn’t test the microphone: ' + e.message;
+    } finally {
+      stream?.getTracks().forEach((t) => t.stop()); ctx?.close().catch(() => {});
+      bar.style.display = 'none'; btn.disabled = false;
+    }
+  });
+  return h('div', { class: 'flex', style: { flexWrap: 'wrap', justifyContent: 'flex-end' } }, btn, bar, out);
+}
 
 const qualityRank = (v) => (/premium/i.test(v.quality) ? 3 : /enhanced/i.test(v.quality) ? 2 : 1);
 const LOCALES = [['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['en-CA', 'English (Canada)'], ['en-AU', 'English (Australia)'], ['en-IN', 'English (India)'], ['es-ES', 'Español (España)'], ['es-MX', 'Español (México)'], ['fr-FR', 'Français'], ['fr-CA', 'Français (Canada)'], ['de-DE', 'Deutsch'], ['it-IT', 'Italiano'], ['pt-BR', 'Português (Brasil)'], ['nl-NL', 'Nederlands'], ['zh-CN', '中文 (普通话)'], ['zh-HK', '粵語 (香港)'], ['zh-TW', '中文 (台灣)'], ['ja-JP', '日本語'], ['ko-KR', '한국어'], ['hi-IN', 'हिन्दी'], ['ar-SA', 'العربية'], ['ru-RU', 'Русский'], ['tr-TR', 'Türkçe']];
@@ -113,6 +163,8 @@ registerTab('appearance', (body) => {
     section('Theme', '', grid),
     section('Details', '', rows(
       row('Accent color', 'Override the theme’s main color.', h('div', { class: 'flex' }, color, h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Reset', onclick: () => { set('appearance.accent', ''); applyAppearance(); refresh(); } }))),
+      row('Background', 'The pattern behind everything.', seg(settings.appearance.background || 'grid', [['grid', 'Grid'], ['circuit', 'Circuit'], ['stars', 'Stars'], ['aurora', 'Aurora'], ['plain', 'Plain']], (v) => { set('appearance.background', v); applyAppearance(); })),
+      row('Compact mode', 'Smaller sidebar, no side panel, tighter spacing: more room for the conversation. Good on small screens.', toggle(!!settings.appearance.compact, (v) => { set('appearance.compact', v); applyAppearance(); }, 'Compact mode')),
       row('Visualizer style', 'The animated core in the middle of the screen.', seg(settings.appearance.visualizer, [['reactor', 'Reactor'], ['orb', 'Orb'], ['wave', 'Wave']], (v) => set('appearance.visualizer', v))),
       row('Animation', 'Reduce for older computers or to save battery.', seg(settings.appearance.motion, [['full', 'Full'], ['reduced', 'Reduced'], ['off', 'Minimal']], (v) => { set('appearance.motion', v); applyAppearance(); })),
       row('Glass effect', 'Blurred glass panels. Lower is faster on older computers.', seg(settings.appearance.glass, [['full', 'Full'], ['low', 'Light'], ['off', 'Solid']], (v) => { set('appearance.glass', v); applyAppearance(); })),
@@ -231,7 +283,11 @@ registerTab('privacy', (body) => {
   info().then((i) => { where.textContent = i.dataDir; });
   const countText = h('span', { text: `${sessions.state.index.length} conversations · ${memory.all().length} memories · ${skills.all().length} skills` });
   body.append(
-    callout('<b>Private by design.</b> No accounts, no ads, no tracking, no analytics. Conversations, memories and settings are stored only on this device. The AI runs on your own computer through Ollama. JARVIS only uses the internet when you download a model, open a website, or check for updates on the Ollama site.', { icon: 'lock' }),
+    callout('<b>Private by design.</b> No accounts, no ads, no tracking, no analytics. Conversations, memories and settings are stored only on this device. The AI runs on your own device. JARVIS only uses the internet for things you ask for (weather, news, research, model downloads, sync), and local-only mode switches all of those off.', { icon: 'lock' }),
+    lockSection(),
+    section('Local-only mode', 'No internet at all: weather, news, research, page reading, sync and downloads are switched off. Everything else keeps working offline.', rows(
+      row('Local-only mode', settings.privacy?.localOnly ? 'On: JARVIS doesn’t use the internet.' : 'Off', toggle(!!settings.privacy?.localOnly, async (v) => { set('privacy.localOnly', v); const ls = await import('../livesync.js'); ls.connect().catch(() => {}); /* pauses sync when on, reconnects when off */ toast(v ? 'Local-only mode on' : 'Local-only mode off'); }, 'Local-only mode')),
+      row('Private chats', 'Chats that are never saved or remembered. Say “private chat”, or use the button under New conversation.', h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { closeSheet(); import('../assistant.js').then((a) => a.send('private chat')); } }, iconNode('lock'), 'Start a private chat')))),
     section('Your data', '', rows(
       row('Stored in', 'Plain JSON files you can back up or delete.', h('div', { class: 'flex' }, where, isNative ? h('button', { class: 'btn btn-sm', type: 'button', text: 'Show in Finder', onclick: () => call('store.reveal') }) : null)),
       row('What is stored', '', countText),
@@ -292,6 +348,33 @@ async function resetAll() {
   Object.assign(settings, structuredClone(DEFAULTS));
   await saveSettingsNow();
   location.reload();
+}
+
+/** App lock: PIN (+ optional spoken passphrase), encryption at rest, auto-lock. */
+function lockSection() {
+  const box = h('div');
+  const draw = async () => {
+    const L = await import('../lock.js');
+    const c = await L.config();
+    if (!c.on) {
+      box.replaceChildren(rows(row('App lock', 'Off. Turn it on to protect JARVIS with a PIN and encrypt your chats, memories, lists, people, projects and notes on this device.', h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: async () => {
+        const pin = await dialog({ title: 'Choose a PIN', text: '4 to 12 digits. If you forget it, your encrypted data can’t be recovered (keep a backup).', input: '', okLabel: 'Next' });
+        if (!pin) return;
+        const again = await dialog({ title: 'Type the PIN again', input: '', okLabel: 'Next' });
+        if (again !== pin) return toast('The PINs didn’t match.', { bad: true });
+        const phrase = await dialog({ title: 'Spoken passphrase (optional)', text: 'A short secret sentence you can say instead of typing the PIN, like “blue rocket over the lake”. It’s a password you say, not a voiceprint, so say it where nobody can hear. Leave empty to skip.', input: '', okLabel: 'Turn on the lock' });
+        try { toast('Encrypting your data…', { ms: 2500 }); await L.enable(pin, { phrase: phrase || '', minutes: 10 }); toast('App lock is on. Your data is encrypted.'); draw(); } catch (e) { toast(e.message, { bad: true }); }
+      } }, iconNode('lock'), 'Turn on'))));
+      return;
+    }
+    box.replaceChildren(rows(
+      row('App lock', `On. Data encrypted on this device.${c.voiceWrap ? ' Spoken passphrase set.' : ''}`, h('div', { class: 'flex' },
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { closeSheet(); L.lockNow(); } }, iconNode('lock'), 'Lock now'),
+        h('button', { class: 'btn btn-sm btn-ghost danger', type: 'button', text: 'Turn off', onclick: async () => { if (!(await dialog({ title: 'Turn off the app lock?', text: 'Your data is saved without encryption again.', okLabel: 'Turn off', danger: true }))) return; try { await L.disable(); toast('App lock is off'); draw(); } catch (e) { toast(e.message, { bad: true }); } } }))),
+      row('Lock after', 'Minutes without using JARVIS (0 = only when you lock it).', select(String(c.minutes ?? 10), [['0', 'Never'], ['2', '2 minutes'], ['5', '5 minutes'], ['10', '10 minutes'], ['30', '30 minutes'], ['60', '1 hour']], async (v) => { await L.setMinutes(v); toast('Saved'); }, 'Lock after'))));
+  };
+  draw();
+  return section('App lock', 'Protect JARVIS on a shared device. Reminders still go off while it’s locked.', box);
 }
 
 // ------------------------------------------------------------------ About

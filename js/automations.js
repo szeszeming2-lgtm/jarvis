@@ -101,3 +101,66 @@ export function start(run) {
   timer = setInterval(tick, 30000);
   setTimeout(tick, 5000);
 }
+
+// ---------------------------------------------------------------- suggestions
+// Look at what you did (the activity log) and spot habits: the same safe action at about
+// the same hour on 3 or more different days in the last 3 weeks → "Want me to do this for you?"
+// Only actions that can be written as a plain command are suggested, and nothing is
+// added until you say yes.
+const PHRASES = {
+  get_weather: () => 'what’s the weather',
+  get_news: (a) => (a.topic ? `news about ${a.topic}` : 'news'),
+  open_app: (a) => (a.name || a.app ? `open ${a.name || a.app}` : ''),
+  open_website: (a) => (a.url ? `open ${String(a.url).replace(/^https?:\/\//, '')}` : ''),
+  evening_summary: () => 'evening summary',
+  morning_briefing: () => 'morning briefing',
+  system_status: () => 'system status',
+  show_list: (a) => (a.list ? `show my ${a.list} list` : ''),
+  list_reminders: () => 'what are my reminders',
+  habits_summary: () => 'how are my habits',
+  goals_summary: () => 'show my goals',
+  budget_summary: () => 'budget summary',
+  project_status: (a) => (a.name || a.project ? `status of ${a.name || a.project}` : ''),
+  focus_session: (a) => (a.action === 'start' ? `start a ${a.minutes || 25} minute focus session${a.task ? ` on ${a.task}` : ''}` : ''),
+  show_links: () => 'show my saved links',
+  storage_report: () => 'storage report',
+};
+const parseArgs = (s) => { try { return typeof s === 'string' ? JSON.parse(s) : s || {}; } catch { return null; } };
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/** activity: [{ts, tool, args, result}] newest first → [{key, command, time, repeat, days, why}] */
+export function suggestions(activity, { now = Date.now(), existing = items, dismissed = [] } = {}) {
+  const since = now - 21 * 86400000;
+  const groups = new Map();
+  for (const e of activity || []) {
+    if (!e?.ts || e.ts < since || e.result !== 'ok' || !PHRASES[e.tool]) continue;
+    const args = parseArgs(e.args);
+    if (!args) continue;
+    const command = PHRASES[e.tool](args);
+    if (!command) continue;
+    const d = new Date(e.ts);
+    const key = `${command}@${d.getHours()}`;
+    const g = groups.get(key) || { command, hour: d.getHours(), days: new Set(), weekdaysOnly: true, mins: [] };
+    g.days.add(d.toDateString());
+    if (d.getDay() === 0 || d.getDay() === 6) g.weekdaysOnly = false;
+    g.mins.push(d.getMinutes());
+    groups.set(key, g);
+  }
+  const have = new Set(existing.map((a) => a.action?.text?.toLowerCase()));
+  const out = [];
+  for (const [key, g] of groups) {
+    if (g.days.size < 3 || have.has(g.command.toLowerCase()) || dismissed.includes(key)) continue;
+    // A few minutes before you usually do it, rounded to 5 minutes.
+    const avg = g.mins.reduce((a, b) => a + b, 0) / g.mins.length;
+    const m = Math.max(0, Math.floor(avg / 5) * 5 - 5), h = g.hour;
+    const time = `${pad2(h)}:${pad2(m)}`;
+    const repeat = g.weekdaysOnly && g.days.size >= 3 ? 'weekdays' : 'daily';
+    out.push({ key, command: g.command, time, repeat, days: g.days.size, why: `You did this on ${g.days.size} different days around ${new Date(2000, 0, 1, h, Math.round(avg)).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.` });
+  }
+  return out.sort((a, b) => b.days - a.days).slice(0, 5);
+}
+
+/** Turn a suggestion into an automation. */
+export function addSuggestion(s) {
+  return add({ name: s.command.charAt(0).toUpperCase() + s.command.slice(1), schedule: { repeat: s.repeat, time: s.time, day: new Date().getDay(), date: new Date().getDate() }, action: { kind: 'command', text: s.command } });
+}

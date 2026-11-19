@@ -1,6 +1,6 @@
 // Offline support for the web version: the interface is cached so JARVIS opens
 // without internet. Requests to Ollama (another origin) are never touched.
-const VERSION = 'jarvis-226d9994b3';
+const VERSION = 'jarvis-7661ed72c8';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/main.js', 'js/util.js', 'js/icons.js', 'js/host.js', 'js/store.js', 'js/ollama.js', 'js/markdown.js', 'js/calc.js',
@@ -12,6 +12,7 @@ const CORE = [
   'js/messaging.js', 'js/briefing.js', 'js/vision.js', 'js/sync.js', 'js/ui/circle.js', 'js/ui/sync.js',
   'js/missions.js', 'js/ui/missions.js',
   'js/links.js', 'js/livesync.js', 'js/ui/links.js',
+  'js/news.js', 'js/lock.js', 'js/notify.js', 'js/creator.js', 'js/pptx.js', 'js/emergency.js', 'js/semantic.js', 'js/languages.js', 'js/ui/command.js', 'js/ui/translate.js',
   'js/automations.js', 'js/documents.js', 'js/features.js', 'js/graph.js', 'js/media.js', 'js/modes.js', 'js/planner.js', 'js/projects.js', 'js/research.js', 'js/search.js', 'js/study.js', 'js/ui/imageedit.js', 'js/ui/planner.js', 'js/ui/projects.js', 'js/ui/search.js',
   'assets/icon-192.png', 'assets/icon-512.png', 'assets/icon-maskable-512.png', 'assets/apple-touch-icon.png', 'assets/favicon-32.png',
 ];

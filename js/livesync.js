@@ -94,6 +94,7 @@ const retry = (ms) => { clearTimeout(retryT); retryT = setTimeout(() => connect(
 export async function connect() {
   if (!settings.syncPhrase) return;
   disconnect();
+  if (settings.privacy?.localOnly) { state.status = 'error'; state.error = 'Local-only mode is on, so syncing is paused.'; emit(); return; }
   state.status = 'connecting'; state.error = ''; emit();
   let Peer;
   try { Peer = await library(); } catch (e) { state.status = 'error'; state.error = e.message; emit(); retry(30000); return; }

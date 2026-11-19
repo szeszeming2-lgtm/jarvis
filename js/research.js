@@ -89,7 +89,8 @@ export const canReadWeb = () => can('webFetch');
  * Deep research. onStep({step, text}) reports progress; onDelta streams the final report.
  * Returns {report (markdown), sources}.
  */
-export async function research(topic, { onStep = () => {}, onDelta, maxSources = 5 } = {}) {
+export async function research(topic, { onStep = () => {}, onDelta, maxSources = 5, factCheck = false } = {}) {
+  if ((await import('./store.js')).settings.privacy?.localOnly) throw new Error('Local-only mode is on, so I don’t use the internet. Turn it off in Settings → Privacy & Data.');
   const web = canReadWeb();
   onStep({ step: 'plan', text: 'Planning the research' });
   const plan = await complete(web
@@ -123,7 +124,9 @@ export async function research(topic, { onStep = () => {}, onDelta, maxSources =
   if (!notes.length) throw new Error('I found pages, but none had useful facts on this topic. Try wording it differently.');
   const noteBlock = notes.map((s) => `[${s.n}] ${s.title}\n${s.notes}`).join('\n\n');
   onStep({ step: 'write', text: 'Writing the report' });
-  const draft = await complete('You are a research writer. Write a clear report in Markdown: a 2-3 sentence summary first, then short sections with headings. Use only the numbered notes, cite them like [1] after the facts they support, and say plainly where the notes disagree or something is unknown. Leave out notes that are not about the topic, and never write about what you left out. No sources list at the end (it is added for you).', `Topic: ${topic}\n\nNotes:\n${noteBlock}`);
+  const draft = await complete(factCheck
+    ? 'You are a careful fact-checker. The topic is a claim. First line: the verdict, exactly one of “✅ True”, “❌ False”, “⚠️ Partly true” or “❓ Not enough evidence”, then a dash and one sentence. Then explain in short paragraphs using only the numbered notes, cite them like [1], and say what is uncertain or may have changed recently. If the notes do not settle it, the verdict is “❓ Not enough evidence”. No sources list at the end (it is added for you).'
+    : 'You are a research writer. Write a clear report in Markdown: a 2-3 sentence summary first, then short sections with headings. Use only the numbered notes, cite them like [1] after the facts they support, and say plainly where the notes disagree or something is unknown. Leave out notes that are not about the topic, and never write about what you left out. No sources list at the end (it is added for you).', `Topic: ${topic}\n\nNotes:\n${noteBlock}`);
   onStep({ step: 'review', text: 'A reviewer is checking the facts' });
   const review = await complete('You are a strict fact-checking reviewer. Compare the report with the notes. List at most 4 problems: claims not supported by the notes, wrong citations, or important missing points. If it is all fine, reply exactly "OK".', `Notes:\n${noteBlock}\n\nReport:\n${draft}`, { maxChars: 1200 });
   let report = draft;

@@ -4,7 +4,7 @@ import { h, iconNode, bus, timeAgo } from '../util.js';
 import { registerTab, closeSheet } from './sheets.js';
 import { section, toast, dialog, callout } from './common.js';
 import { call, can } from '../host.js';
-import { settings, set } from '../store.js';
+import { settings, set, getActivity } from '../store.js';
 import * as P from '../planner.js';
 import * as media from '../media.js';
 import * as auto from '../automations.js';
@@ -47,7 +47,26 @@ function automationsSection() {
       if (!req) return toast('Start with “every day / weekday / Monday… at <time>” and then what to do.', { bad: true, ms: 6000 });
       const r = auto.fromWords(req);
       toast(`Set: ${r.when}`);
-    } }, iconNode('plus'), 'New automation'));
+    } }, iconNode('plus'), 'New automation'),
+    suggestionsBox());
+}
+
+/** "You often do X around 8am: automate it?" (from your own activity; nothing is added without a yes). */
+function suggestionsBox() {
+  const box = h('div', { class: 'list', style: { marginTop: '10px' } });
+  getActivity().then((log) => {
+    const list = auto.suggestions(log, { dismissed: settings.autoSuggest?.dismissed || [] });
+    if (!list.length) return;
+    box.replaceChildren(h('div', { class: 'muted small', text: 'Suggested from what you do often:' }), ...list.map((s) => h('div', { class: 'item' },
+      h('span', { class: 'item-ic' }, iconNode('sparkles')),
+      h('div', { class: 'item-main' }, h('div', { class: 'item-title', text: `“${s.command}” ${auto.describe({ repeat: s.repeat, time: s.time })}` }), h('div', { class: 'item-sub', text: s.why })),
+      h('div', { class: 'item-actions' },
+        h('button', { class: 'btn btn-sm', type: 'button', text: 'Automate', onclick: () => { const r = auto.addSuggestion(s); toast(`Set: ${r.when}`); } }),
+        h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'No thanks', onclick: () => { set('autoSuggest.dismissed', [...(settings.autoSuggest?.dismissed || []), s.key].slice(-50)); box.querySelector(`[data-k="${CSS.escape(s.key)}"]`)?.remove(); toast('Okay, I won’t suggest that again.'); bus.emit('automations', auto.all()); } })),
+    )));
+    box.querySelectorAll('.item').forEach((el, i) => { el.dataset.k = list[i].key; });
+  }).catch(() => {});
+  return box;
 }
 
 // ---------------------------------------------------------------- habits
@@ -180,11 +199,12 @@ function voiceSection() {
         h('div', { class: 'flex', style: { marginTop: '6px' } },
           n.text ? null : h('button', { class: 'btn btn-sm', type: 'button', onclick: tr }, iconNode('note'), 'Turn into text'),
           n.text ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Save to my notes', onclick: async () => { const l = await import('../lists.js'); l.add('notes', [n.text.slice(0, 500)]); toast('Added to your notes list'); } }) : null,
+          n.text ? h('button', { class: 'btn btn-sm', type: 'button', onclick: async () => { closeSheet(); const a = await import('../assistant.js'); a.send('These are notes from a meeting (a recording turned into text). Write meeting minutes: a 2-sentence summary, the key points, decisions made, action items (who, what, by when, if mentioned) and open questions. Only use what is in the text.', { attachment: { name: n.title, path: n.title, text: n.text } }); } }, iconNode('list'), 'Meeting notes') : null,
           n.text ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Ask about it', onclick: async () => { closeSheet(); const a = await import('../assistant.js'); a.send('Summarize this voice note and list any to-dos in it.', { attachment: { name: n.title, path: n.title, text: n.text } }); } }) : null)),
       h('button', { class: 'icon-btn', type: 'button', 'aria-label': `Delete ${n.title}`, onclick: async () => { if (await dialog({ title: 'Delete this voice note?', okLabel: 'Delete', danger: true })) media.removeNote(n.id); } }, iconNode('trash')));
   }));
   if (!media.allNotes().length) list.append(h('div', { class: 'empty', text: 'No voice notes yet. Recordings stay on this device.' }));
-  return section('Voice notes', 'Record a thought, then turn it into text (on this device, in about 100 languages).', h('div', { class: 'flex' }, btn, meter), status, list);
+  return section('Voice notes & meetings', 'Record a thought or a meeting (up to 10 minutes), turn it into text on this device (about 100 languages), then get meeting notes with decisions and action items. Ask everyone first before recording a meeting.', h('div', { class: 'flex' }, btn, meter), status, list);
 }
 
 // ---------------------------------------------------------------- audio & video files

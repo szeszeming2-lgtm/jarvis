@@ -39,6 +39,7 @@ export function nextDue(due, repeat, from = Date.now()) {
     else if (repeat === 'weekdays') { do d.setDate(d.getDate() + 1); while (d.getDay() === 0 || d.getDay() === 6); }
     else if (repeat === 'weekly') d.setDate(d.getDate() + 7);
     else if (repeat === 'monthly') d.setMonth(d.getMonth() + 1);
+    else if (repeat === 'yearly') d.setFullYear(d.getFullYear() + 1);
   };
   do step(); while (d.getTime() <= from);
   return d.getTime();
@@ -79,7 +80,7 @@ export async function add(text, when, { textMe = false, callMe = false, repeat =
   }
   if (due < Date.now() - 60000) throw new Error('That time has already passed.');
   if (repeat === 'weekdays') { const d = new Date(due); while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); due = d.getTime(); }
-  const r = { id: uid('r'), text, due, created: Date.now(), done: false, textMe: !!textMe, callMe: !!callMe, repeat: ['daily', 'weekdays', 'weekly', 'monthly'].includes(repeat) ? repeat : '' };
+  const r = { id: uid('r'), text, due, created: Date.now(), done: false, textMe: !!textMe, callMe: !!callMe, repeat: ['daily', 'weekdays', 'weekly', 'monthly', 'yearly'].includes(repeat) ? repeat : '' };
   // Desktop app: also put it in the system Reminders app (syncs to your phone).
   if (can('reminders') && settings.reminders?.system !== false) {
     try { const s = await call('reminders.add', { text, due, repeat: r.repeat }); r.systemId = s?.id; } catch (e) { r.systemError = e.message; }
@@ -88,7 +89,7 @@ export async function add(text, when, { textMe = false, callMe = false, repeat =
   schedule(r);
   save();
   if (!isNative && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
-  const REP = { daily: 'every day', weekdays: 'every weekday', weekly: `every ${new Date(due).toLocaleDateString(undefined, { weekday: 'long' })}`, monthly: 'every month' };
+  const REP = { daily: 'every day', weekdays: 'every weekday', weekly: `every ${new Date(due).toLocaleDateString(undefined, { weekday: 'long' })}`, monthly: 'every month', yearly: `every year on ${new Date(due).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}` };
   return { ...r, human: r.repeat ? `${REP[r.repeat]} at ${new Date(due).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}, starting ${describeWhen(new Date(due))}` : describeWhen(new Date(due)) };
 }
 
@@ -120,7 +121,7 @@ export function toICS(r) {
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//JARVIS//Reminders//EN', 'CALSCALE:GREGORIAN',
     'BEGIN:VEVENT', `UID:${r.id}@jarvis.local`, `DTSTAMP:${z(Date.now())}`, `DTSTART:${z(r.due)}`, `DTEND:${z(r.due + 15 * 60000)}`,
     `SUMMARY:${esc(r.text)}`, 'DESCRIPTION:Reminder from JARVIS',
-    ...(r.repeat ? [`RRULE:${{ daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY' }[r.repeat]}`] : []),
+    ...(r.repeat ? [`RRULE:${{ daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY', yearly: 'FREQ=YEARLY' }[r.repeat]}`] : []),
     'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(r.text)}`, 'TRIGGER:PT0S', 'END:VALARM',
     'END:VEVENT', 'END:VCALENDAR', '',
   ].join('\r\n');

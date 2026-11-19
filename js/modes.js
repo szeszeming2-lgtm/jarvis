@@ -23,6 +23,15 @@ export const MODES = {
   teacher: { label: 'Teacher', icon: 'book', desc: 'Teaches a topic from the ground up, with exercises.',
     prompt: 'TEACHER MODE: teach like a great teacher. Start from what the user already knows, build up in small steps with examples and analogies, then give one short exercise and its answer hidden at the end under "Answer:".',
     brief: 'Teach step by step with an example.' },
+  funny: { label: 'Funny', icon: 'sparkles', desc: 'Helpful answers with jokes and light humour.',
+    prompt: 'FUNNY MODE: be genuinely helpful AND funny. Keep every fact correct, then add light jokes, playful comparisons or a pun. Never joke about serious things (health, grief, danger, money trouble): there, just be kind and clear.',
+    brief: 'Be helpful and add a light joke.' },
+  sarcastic: { label: 'Sarcastic', icon: 'wand', desc: 'Dry, teasing wit (still helpful, never mean).',
+    prompt: 'SARCASTIC MODE: answer with dry, teasing wit, like a sarcastic but loyal butler. The help itself must stay correct and complete. Tease situations, never insult the user. Drop the sarcasm completely for anything serious (health, safety, grief, emergencies).',
+    brief: 'Answer helpfully with dry, friendly sarcasm.' },
+  factcheck: { label: 'Fact-check', icon: 'check', desc: 'Checks claims and says how sure it is.',
+    prompt: 'FACT-CHECK MODE: for every claim the user makes or asks about, start with a verdict on its own line: ✅ True, ❌ False, ⚠️ Partly true, or ❓ Can’t tell. Then explain why in 2–4 sentences, saying what is well established and what is uncertain. You have no live internet in normal chat, so say when something may have changed recently and suggest “fact check <claim>” to check it against sources. Never invent sources.',
+    brief: 'Start with a verdict (True / False / Partly true / Can’t tell), then why.' },
   translator: { label: 'Translator', icon: 'language', desc: 'Translates everything you say.',
     prompt: '', brief: '' },
   troubleshoot: { label: 'Troubleshooting', icon: 'sliders', desc: 'Finds and fixes problems step by step.',
@@ -60,6 +69,6 @@ export function find(word) {
   const ALIASES = { normal: 'assistant', default: 'assistant', regular: 'assistant', personal: 'assistant', 'personal assistant': 'assistant', assistant: 'assistant',
     studying: 'study', homework: 'study', coding: 'developer', code: 'developer', dev: 'developer', programmer: 'developer', programming: 'developer',
     researcher: 'research', creative: 'creative', writing: 'creative', work: 'professional', business: 'professional', formal: 'professional',
-    teaching: 'teacher', tutor: 'teacher', translate: 'translator', translation: 'translator', troubleshooting: 'troubleshoot', fix: 'troubleshoot', 'fix it': 'troubleshoot', repair: 'troubleshoot', plan: 'planning', planner: 'planning' };
+    teaching: 'teacher', humor: 'funny', humour: 'funny', joke: 'funny', jokes: 'funny', fun: 'funny', sarcasm: 'sarcastic', 'fact check': 'factcheck', 'fact-check': 'factcheck', 'fact checking': 'factcheck', 'fact checker': 'factcheck', tutor: 'teacher', translate: 'translator', translation: 'translator', troubleshooting: 'troubleshoot', fix: 'troubleshoot', 'fix it': 'troubleshoot', repair: 'troubleshoot', plan: 'planning', planner: 'planning' };
   return MODES[w] ? w : ALIASES[w] || null;
 }

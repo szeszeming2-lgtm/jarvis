@@ -155,7 +155,7 @@ export const TOOLS = [
       when: { type: 'string', description: 'When, in plain words exactly as the user said it: "in 20 minutes", "at 5:30 pm", "tomorrow at 9am", "friday at 3pm"' },
       text_me: { type: 'boolean', description: 'Also send the user a text message when it is due (only if they ask to be texted)' },
       call_me: { type: 'boolean', description: 'Call the user when it is due (only if they ask to be called or woken up)' },
-      repeat: { type: 'string', enum: ['daily', 'weekdays', 'weekly', 'monthly'], description: 'Only if the user says it should repeat (every day, every Monday…)' },
+      repeat: { type: 'string', enum: ['daily', 'weekdays', 'weekly', 'monthly', 'yearly'], description: 'Only if the user says it should repeat (every day, every Monday…)' },
     }, ['text', 'when']),
     ask: (a) => ({ title: `Remind you: “${a.text}”`, detail: a.when }),
     run: async (a) => {
@@ -262,10 +262,10 @@ export const TOOLS = [
       return { name: p.name, number: a.number ? p.phone : '', app: app ? APPS[app].label : '', handle: app ? p[app] : '' };
     },
     done: (r) => `Saved ${r.name}` },
-  { name: 'get_weather', category: 'web', icon: 'sun', group: 'weather',
+  { name: 'get_weather', net: true, category: 'web', icon: 'sun', group: 'weather',
     ...s('Get the current weather and the forecast for today and tomorrow. Leave place empty for the user\'s home city.', { place: { type: 'string' } }),
     run: async (a) => weather.forecast(a.place), done: (r) => `${r.now.icon} ${r.now.temp}${r.units} in ${r.place.split(',')[0]}` },
-  { name: 'set_home_city', icon: 'home', group: 'weather',
+  { name: 'set_home_city', net: true, icon: 'home', group: 'weather',
     ...s('Remember the user\'s home city for weather.', { place: { type: 'string' } }, ['place']),
     run: async (a) => weather.setHome(a.place), done: (r) => `Home city: ${r.name}` },
   { name: 'create_project', icon: 'folder', group: 'projects',
@@ -298,6 +298,35 @@ export const TOOLS = [
       return { prompt: a.prompt, picture: `data:${r.type};base64,${r.image}` };
     },
     done: () => 'Picture made' },
+  // ---- Mac computer control (windows, brightness, Trash, apps, storage, duplicates, health check)
+  { name: 'window_control', icon: 'display', group: 'apps', needs: 'macControl', category: 'apps',
+    ...s('Move or resize the window of the app the user was just using (or a named app): minimize, maximize, fullscreen, exit_fullscreen, left (left half), right (right half), center, close.', { action: { type: 'string', enum: ['minimize', 'maximize', 'fullscreen', 'exit_fullscreen', 'left', 'right', 'center', 'close'] }, app: { type: 'string' } }, ['action']),
+    run: async (a) => call('mac.window', { action: a.action, app: a.app || '' }), done: (r) => `${r.app}: ${r.action}` },
+  { name: 'set_brightness', icon: 'sun', group: 'system', needs: 'macControl', category: 'system',
+    ...s('Make the screen brighter or dimmer (like pressing the brightness keys). steps 1–16.', { direction: { type: 'string', enum: ['up', 'down'] }, steps: { type: 'number' } }, ['direction']),
+    run: async (a) => call('mac.brightness', { direction: a.direction, steps: a.steps || 3 }), done: (r) => `Brightness ${r.direction}` },
+  { name: 'empty_trash', icon: 'trash', group: 'files', needs: 'macControl', category: 'writeFiles', alwaysAsk: true,
+    ...s('Empty the Trash (permanently deletes what is in it). Always confirm.', {}),
+    prepare: async () => call('mac.trashInfo', {}),
+    ask: (a, p) => ({ title: `Empty the Trash (${p.count} item${p.count === 1 ? '' : 's'})`, detail: 'These are deleted for good and can’t be brought back.' }),
+    run: async () => call('mac.emptyTrash', {}), done: (r) => `Emptied ${r.emptied}` },
+  { name: 'running_apps', icon: 'app', group: 'status', needs: 'macControl',
+    ...s('Which apps are open, with how much memory and CPU each uses.', {}),
+    run: async () => call('mac.runningApps', {}), done: (r) => `${r.apps.length} apps open` },
+  { name: 'storage_report', icon: 'database', group: 'status', needs: 'macControl',
+    ...s('What is using disk space: folder sizes in the home folder and the biggest files.', {}),
+    run: async () => call('mac.storage', {}), done: () => 'Storage checked' },
+  { name: 'find_duplicates', icon: 'copy', group: 'files', needs: 'macControl', category: 'findFiles',
+    ...s('Find duplicate files (same content) in a folder (default Downloads).', { folder: { type: 'string' } }),
+    run: async (a) => { const r = await call('mac.duplicates', { folder: a.folder || '' }); lastDupes = r; return r; }, done: (r) => `${r.groups.length} duplicate sets` },
+  { name: 'trash_duplicates', icon: 'trash', group: 'files', needs: 'macControl', category: 'organize', alwaysAsk: true,
+    ...s('Move the extra copies from the last duplicate search to the Trash (keeps one of each). Recoverable from the Trash.', {}),
+    prepare: async () => { if (!lastDupes?.groups?.length) throw new Error('Find duplicates first: say “find duplicate files in Downloads”.'); return { paths: lastDupes.groups.flatMap((g) => g.paths.slice(1)) }; },
+    ask: (a, p) => ({ title: `Move ${p.paths.length} extra cop${p.paths.length === 1 ? 'y' : 'ies'} to the Trash`, detail: 'One copy of each file is kept. You can get them back from the Trash.', preview: p.paths.slice(0, 12).map((x) => '• ' + x.split('/').pop()).join('\n') }),
+    run: async (a, p) => { const r = await call('mac.trashFiles', { paths: p.paths }); lastDupes = null; return r; }, done: (r) => `Moved ${r.moved} to Trash` },
+  { name: 'diagnose_computer', icon: 'cpu', group: 'status', needs: 'status',
+    ...s('Check the computer for common problems (low storage, memory pressure, heavy apps, battery, long uptime, AI engine) and explain them.', {}),
+    run: async () => diagnose(), done: (r) => `${r.findings.length} findings` },
   { name: 'save_link', icon: 'globe', group: 'basics',
     ...s('Save a web link for the user to read later (their Saved links).', { url: { type: 'string' }, note: { type: 'string' } }, ['url']),
     run: async (a) => { const L = await import('./links.js'); const l = L.add(a.url, { note: a.note || '' }); return { url: l.url, title: l.title, existed: !!l.existed, count: L.all().length }; },
@@ -306,7 +335,7 @@ export const TOOLS = [
     ...s('List the user\'s saved links (optionally matching some words).', { query: { type: 'string' } }),
     run: async (a) => { const L = await import('./links.js'); const items = (a.query ? L.search(a.query) : L.all().filter((l) => !l.read)).slice(0, 12); return { links: items.map((l) => ({ title: l.title, url: l.url })), total: L.all().length }; },
     done: (r) => `${r.links.length} links` },
-  { name: 'summarize_page', icon: 'globe', group: 'web', needs: 'webFetch', category: 'web',
+  { name: 'summarize_page', net: true, icon: 'globe', group: 'web', needs: 'webFetch', category: 'web',
     ...s('Read a web page and return its text so you can summarize or answer questions about it (Mac app).', { url: { type: 'string' } }, ['url']),
     run: async (a) => { const L = await import('./links.js'); const p = await L.pageText(L.findUrl(a.url) || a.url); return { title: p.title, text: p.text.slice(0, 12000) }; },
     done: (r) => `Read ${r.title || 'the page'}` },
@@ -335,6 +364,14 @@ export const TOOLS = [
   { name: 'copy_to_clipboard', icon: 'copy', group: 'basics',
     ...s('Put text on the clipboard so the user can paste it.', { text: { type: 'string' } }, ['text']),
     run: async (a) => { await call('clipboard.write', { text: a.text }); return { chars: a.text.length }; }, done: () => 'Copied' },
+  { name: 'focus_session', icon: 'target', group: 'focus',
+    ...s('Start or stop a focus session (Pomodoro). While focusing, non-urgent alerts wait until it ends.', { action: { type: 'string', enum: ['start', 'stop', 'status'] }, minutes: { type: 'number' }, task: { type: 'string' } }, ['action']),
+    run: async (a) => { const P = await import('./planner.js'); if (a.action === 'stop') { const r = P.stopFocus(false); if (!r) throw new Error('There’s no focus session running.'); return { stopped: true, ...r }; } if (a.action === 'status') return { ...P.focusState(), stats: P.focusStats(1) }; return P.startFocus(a.minutes || 25, a.task || ''); },
+    done: (r) => (r.stopped ? `Focus: ${r.minutes} min` : r.running ? `Focus ${r.left}` : 'No focus session') },
+  { name: 'note_distraction', icon: 'note', group: 'focus',
+    ...s('During a focus session, save a stray thought for later without breaking focus.', { text: { type: 'string' } }, ['text']),
+    run: async (a) => { const P = await import('./planner.js'); const n = P.addDistraction(a.text); if (!n) { const l = await import('./lists.js'); l.add('to-do', [a.text]); return { saved: 'to-do' }; } return { saved: 'focus', count: n }; },
+    done: () => 'Saved for later' },
   { name: 'create_automation', icon: 'clock', group: 'planner',
     ...s('Schedule something to run again and again. "every": day, weekday, week, month, hour, morning, evening or a weekday name; "at": a time like 8am; "command": what to do, in the user\'s words (e.g. "open Spotify", "/workday", "tell me the weather").', { every: { type: 'string' }, at: { type: 'string' }, command: { type: 'string' } }, ['every', 'command']),
     run: async (a) => { const A = await import('./automations.js'); const r = A.fromWords(a); return { id: r.id, when: r.when, command: a.command }; },
@@ -394,6 +431,46 @@ export const TOOLS = [
       return { address: addr };
     },
     done: () => 'Home address saved' },
+  { name: 'add_event', category: 'reminders', icon: 'clock', group: 'reminders',
+    ...s('Add an event to the user\'s calendar. "when" in the user\'s words ("tomorrow at 3pm", "March 3 at 10am"); minutes = length.', { title: { type: 'string' }, when: { type: 'string' }, minutes: { type: 'number' }, location: { type: 'string' } }, ['title', 'when']),
+    ask: (a) => ({ title: `Add “${a.title}” to your calendar`, detail: a.when }),
+    run: async (a) => {
+      const { parseWhen } = await import('./when.js');
+      const p = parseWhen(a.when);
+      if (!p) throw new Error(`I couldn’t understand the time “${a.when}”. Try “tomorrow at 3pm” or “March 3 at 10am”.`);
+      const start = p.date.getTime(), end = start + (Number(a.minutes) || 60) * 60000;
+      const human = describeWhen(p.date);
+      if (can('calendar')) { await call('calendar.add', { title: a.title, start, end, location: a.location || '' }); return { title: a.title, when: human, where: 'calendar' }; }
+      // Browser/phone: a calendar file that opens “Add to Calendar”.
+      const z = (d) => new Date(d).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+      const esc = (x) => String(x).replace(/[\\;,]/g, (c) => '\\' + c);
+      const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//JARVIS//Events//EN', 'BEGIN:VEVENT', `UID:${Date.now()}@jarvis.local`, `DTSTAMP:${z(Date.now())}`, `DTSTART:${z(start)}`, `DTEND:${z(end)}`, `SUMMARY:${esc(a.title)}`, a.location ? `LOCATION:${esc(a.location)}` : '', 'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(a.title)}`, 'TRIGGER:-PT15M', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR', ''].filter(Boolean).join('\r\n');
+      await call('file.save', { name: `${a.title.replace(/[^\w\- ]+/g, '').slice(0, 40) || 'Event'}.ics`, content: ics, type: 'text/calendar' });
+      return { title: a.title, when: human, where: 'file' };
+    },
+    done: (r) => `Event: ${r.title}` },
+  { name: 'save_birthday', icon: 'heart', group: 'reminders',
+    ...s('Remember someone\'s birthday and remind the user every year on the day. date like "March 3" or "3/14".', { name: { type: 'string' }, date: { type: 'string' } }, ['name', 'date']),
+    run: async (a) => {
+      const { monthDay } = await import('./when.js');
+      const d = monthDay(a.date);
+      if (!d) throw new Error(`I couldn’t read the date “${a.date}”. Try “March 3”.`);
+      const who = String(a.name).replace(/^my /i, '').trim();
+      const p = people.upsert({ name: who, allowEmpty: true, birthday: `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` });
+      d.setHours(9, 0, 0, 0);
+      if (d.getTime() < Date.now()) d.setFullYear(d.getFullYear() + 1);
+      const r = await reminders.add(`🎂 It’s ${p.name}’s birthday today`, d, { repeat: 'yearly' });
+      return { name: p.name, date: d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }), next: r.human };
+    },
+    done: (r) => `${r.name}: ${r.date}` },
+  { name: 'get_news', net: true, category: 'web', icon: 'globe', group: 'news',
+    ...s('Today\'s news headlines (Wikipedia current events; BBC too in the Mac app), optionally about a topic.', { topic: { type: 'string' } }),
+    run: async (a) => (await import('./news.js')).headlines({ topic: a.topic || '' }),
+    done: (r) => `${r.items.length} headlines` },
+  { name: 'evening_summary', icon: 'moon', group: 'briefing',
+    ...s('The user\'s daily report / evening summary: what they got done today (to-dos, project tasks, habits, workouts, focus, missions) and what is coming tomorrow.', {}),
+    run: async () => { const b = await import('./briefing.js'); if (new Date().getHours() >= 17) set('briefing.lastEvening', b.todayKey()); return b.buildEvening(); },
+    done: () => 'Daily report ready' },
   { name: 'morning_briefing', icon: 'coffee', group: 'briefing',
     ...s('The user\'s briefing for today: weather, calendar, reminders and to-do list. Use for "good morning", "what\'s my day", "what do I need to do today".', {}),
     run: async () => { const b = await import('./briefing.js'); if (new Date().getHours() < 14) set('briefing.last', b.todayKey()); return b.build(); },
@@ -436,10 +513,24 @@ export const GROUPS = {
   projects: { label: 'Projects (notes, tasks, documents)', icon: 'folder' },
   planner: { label: 'Planner (habits, goals, budget)', icon: 'target' },
   briefing: { label: 'Morning briefing', icon: 'coffee' },
+  news: { label: 'News headlines', icon: 'globe' },
+  focus: { label: 'Focus sessions', icon: 'target' },
+  creator: { label: 'Creator (slides, spreadsheets, websites)', icon: 'wand' },
+  translator: { label: 'Live translator', icon: 'language' },
+  missions: { label: 'Mission Control', icon: 'zap' },
+  research: { label: 'Deep research and fact check', icon: 'search' },
 };
+
+/** Local-only mode: nothing that uses the internet. */
+export const localOnly = () => !!settings.privacy?.localOnly;
+const privateChat = () => !!sessionsMod?.state?.current?.private;
+let sessionsMod = null;
+import('./sessions.js').then((m) => { sessionsMod = m; });
 
 export function available(tool) {
   if (tool.needs && !can(tool.needs)) return false;
+  if (tool.net && localOnly()) return false;
+  if (tool.category === 'memory' && privateChat()) return false;
   if ((settings.skills?.disabledGroups || []).includes(tool.group)) return false;
   if (tool.category === 'memory' && !settings.memory.allowSave) return false;
   if (tool.category && tool.category !== 'memory' && settings.permissions[tool.category] === 'off') return false;
@@ -469,6 +560,8 @@ export async function execute(name, args = {}, ctx = {}) {
   if (!tool) return { ok: false, error: `There is no ability called ${name}.` };
   if (tool.needs && !can(tool.needs)) return { ok: false, error: isNative ? 'This ability is not supported on this device yet.' : 'This ability needs the JARVIS desktop app.' };
   if ((settings.skills?.disabledGroups || []).includes(tool.group)) return { ok: false, declined: true, error: 'That plugin is turned off. Turn it on in Settings → Plugins.' };
+  if (tool.net && localOnly()) return { ok: false, declined: true, error: 'Local-only mode is on, so I don’t use the internet. Turn it off in Settings → Privacy & Data to use this.' };
+  if (tool.category === 'memory' && privateChat()) return { ok: false, declined: true, error: 'This is a private chat, so nothing is remembered.' };
   const level = ctx.preApproved && tool.category !== 'commands' ? 'allow' : levelFor(tool);
   const label = CATEGORIES[tool.category]?.label || tool.name;
   if (level === 'off') return { ok: false, declined: true, error: `The user switched off "${label}" in Settings → Permissions.` };
@@ -590,6 +683,28 @@ export function homeLink(home, mode = settings.profile?.travel) {
   const enc = encodeURIComponent(home);
   if (apple && m !== 'c') return { app: 'Apple Maps', mode: word, url: `${isNative ? 'maps://' : 'https://maps.apple.com/'}?daddr=${enc}&dirflg=${m}` };
   return { app: 'Google Maps', mode: word, url: `https://www.google.com/maps/dir/?api=1&destination=${enc}&travelmode=${{ d: 'driving', w: 'walking', r: 'transit', c: 'bicycling' }[m]}` };
+}
+
+let lastDupes = null;
+
+/** Rule-based health check (the AI explains it in plain words). */
+async function diagnose() {
+  const s = await call('system.status');
+  const findings = [];
+  const gb = (b) => (b / 1e9).toFixed(1) + ' GB';
+  if (s.diskFree != null) { const pct = s.diskTotal ? (s.diskFree / s.diskTotal) * 100 : null; if (s.diskFree < 15e9 || (pct != null && pct < 10)) findings.push({ level: 'high', text: `Storage is nearly full (${gb(s.diskFree)} free). Macs slow down when space is low.`, fix: 'Say “storage report” to see what’s big, empty the Trash, or “find duplicate files”.' }); }
+  const memPct = s.memTotal ? (s.memUsed / s.memTotal) * 100 : 0;
+  if (memPct > 88) findings.push({ level: 'mid', text: `Memory is ${Math.round(memPct)}% used.`, fix: 'Quit apps you aren’t using (say “what apps are running”).' });
+  if (s.cpu > 85) findings.push({ level: 'mid', text: `The processor is busy (${Math.round(s.cpu)}%).`, fix: 'Something is working hard; check running apps.' });
+  if (s.battery?.level != null && s.battery.level < 15 && !s.battery.charging) findings.push({ level: 'mid', text: `Battery is low (${Math.round(s.battery.level)}%).`, fix: 'Plug in soon.' });
+  if (s.uptime > 14 * 86400) findings.push({ level: 'low', text: `Your Mac hasn’t restarted in ${Math.round(s.uptime / 86400)} days.`, fix: 'A restart clears memory and finishes updates.' });
+  let heavy = [];
+  if (can('macControl')) { try { heavy = (await call('mac.runningApps', {})).apps.filter((a) => a.memoryMB > 1500 || a.cpu > 50).slice(0, 3); } catch {} }
+  for (const a of heavy) findings.push({ level: 'low', text: `${a.name} is using ${a.memoryMB > 1000 ? (a.memoryMB / 1024).toFixed(1) + ' GB of memory' : a.memoryMB + ' MB'}${a.cpu > 50 ? ` and ${Math.round(a.cpu)}% CPU` : ''}.`, fix: `Quit ${a.name} if you’re not using it.` });
+  const ol = await import('./ollama.js');
+  if (!ol.isPhone() && ol.engine.status !== 'online') findings.push({ level: 'mid', text: 'The AI engine (Ollama) isn’t running.', fix: 'Open AI Models and press Start.' });
+  if (!navigator.onLine) findings.push({ level: 'low', text: 'You’re offline.', fix: 'Weather, research and sync need the internet; everything else works.' });
+  return { findings, cpu: Math.round(s.cpu), memPct: Math.round(memPct), diskFree: s.diskFree, battery: s.battery?.level ?? null };
 }
 
 /** Make the user's iPhone alert now (iCloud Reminders, Mac app). Removed again after 15 minutes. */

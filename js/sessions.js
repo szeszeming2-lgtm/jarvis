@@ -11,8 +11,8 @@ export async function load() {
 
 const saveIndex = () => writeSoon('sessions', () => state.index, 300);
 
-export function create() {
-  const s = { id: uid('c'), title: 'New conversation', created: Date.now(), updated: Date.now(), messages: [], titled: false };
+export function create({ private: priv = false } = {}) {
+  const s = { id: uid('c'), title: priv ? 'Private chat' : 'New conversation', created: Date.now(), updated: Date.now(), messages: [], titled: priv, private: priv || undefined };
   state.current = s;
   bus.emit('session', s);
   return s;
@@ -34,6 +34,7 @@ export async function open(id) {
 /** Persist the current conversation (debounced) and refresh its index entry. */
 export function touch(s = state.current) {
   if (!s || !s.messages.length) return;
+  if (s.private) return; // private chats are never saved
   s.updated = Date.now();
   const firstUser = s.messages.find((m) => m.role === 'user');
   const last = [...s.messages].reverse().find((m) => (m.role === 'assistant' || m.role === 'user') && m.content);
@@ -50,7 +51,7 @@ export function touch(s = state.current) {
 }
 
 export function saveNow(s = state.current) {
-  if (!s || !s.messages.length) return Promise.resolve();
+  if (!s || !s.messages.length || s.private) return Promise.resolve();
   touch(s);
   return write('session-' + s.id, s);
 }

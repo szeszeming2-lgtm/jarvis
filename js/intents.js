@@ -1,7 +1,9 @@
 // Instant commands: common requests handled locally without the AI model,
 // so they are immediate and work even before any model is installed.
 import { looksLikeMath } from './calc.js';
-import { parseWhen, describeWhen } from './when.js';
+import { findLang } from './languages.js';
+import { parseWhen, describeWhen, monthDay } from './when.js';
+const monthDayOk = (s) => !!monthDay(s);
 import { summary as weatherSummary } from './weather.js';
 import { summaryText as workoutSummaryText } from './workout.js';
 import { knows as knowsUnit } from './converter.js';
@@ -38,6 +40,26 @@ export function match(raw, { customSkills = [] } = {}) {
   // Morning briefing: real weather, calendar, reminders and to-dos (before the old "brief" skill).
   if (/^(?:good morning|morning|morning brief(?:ing)?|brief me|my briefing|daily briefing|\/brief|what'?s my day(?: look)?(?: like)?(?: today)?|what(?:'s| is) (?:on )?(?:my day|today|my plate today|my schedule today)|what do i (?:have|need) to do today|what'?s happening today|plan my day|my day)(?:,? (?:jarvis|computer|sir|ma'?am|boss|buddy))?$/i.test(low)) return { tool: 'morning_briefing', args: {} };
 
+  // Focus sessions
+  if ((r = low.match(/^(?:(?:start|begin|let'?s do|do) (?:a |an |my )?(?:(\d{1,3})[- ]?(?:min(?:ute)?s?)? )?(?:focus(?: session| mode| time)?|pomodoro|deep work)|focus|focus mode)(?: for (\d{1,3}) ?(?:min(?:ute)?s?|m)\b)?(?: (?:on|for|about) (.{2,80}))?$/)) && !/^focus (?:status|on$)/.test(low)) return { tool: 'focus_session', args: { action: 'start', minutes: Math.min(240, +(r[1] || r[2] || 25)), task: (r[3] || '').trim() } };
+  if (/^(?:stop|end|finish|cancel|exit) (?:the |my )?(?:focus(?: session| mode)?|pomodoro)$/.test(low)) return { tool: 'focus_session', args: { action: 'stop' } };
+  if (/^(?:how long (?:is )?left(?: in (?:my )?focus)?|focus status|how much focus time)$/.test(low)) return { tool: 'focus_session', args: { action: 'status' } };
+  if ((r = t.match(/^(?:note|remind me later|later|distraction|park this|save for later):\s*(.{2,300})$/i))) return { tool: 'note_distraction', args: { text: r[1] } };
+
+  if ((r = low.match(/^(?:text|send) my (?:location|position) to (?:my )?(emergency contacts|.{2,40})$/))) return { local: 'sharelocation', to: /emergency/.test(r[1]) ? 'emergency' : r[1] };
+  // Emergency
+  if (/^(?:emergency|help me(?: please)?|i need help|call (?:for )?help|sos|call (?:an )?ambulance|call (?:the )?police|call (?:the )?emergency(?: number| services)?|call 911|call 999|call 112|call 000|call my emergency contacts?)$/.test(low)) return { local: 'emergency' };
+
+  // News
+  if ((r = low.match(/^(?:what'?s (?:in )?the news|what'?s happening(?: in the world)?(?: today)?|(?:today'?s |the |latest |top )?(?:news|headlines)(?: today)?|news (?:about|on) (.+)|(?:any )?news (?:about|on) (.+)|(?:latest |any )?news on (.+)|tell me the news)$/))) return { tool: 'get_news', args: { topic: (r[1] || r[2] || r[3] || '').trim() } };
+
+  // Birthdays and calendar events
+  if ((r = t.match(/^(?:(?:remember|save|add) (?:that )?)?(.{2,40}?)['’]s? birthday(?: is)?(?: on)? (.{3,30})$/i)) && monthDayOk(r[2])) return { tool: 'save_birthday', args: { name: r[1].replace(/^my /i, ''), date: r[2] } };
+  if ((r = t.match(/^(?:add|put|schedule|create|book|make)(?: an?)?(?: event| meeting| appointment)?(?: called| named)? (.{2,80}?) (?:to my calendar |in my calendar |on my calendar )?((?:on |for )?(?:today|tomorrow|tonight|next |this |monday|tuesday|wednesday|thursday|friday|saturday|sunday|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}\/\d{1,2}|the \d{1,2}(?:st|nd|rd|th)|at \d).*)$/i)) && /calendar|event|meeting|appointment|schedule|book/i.test(t) && parseWhen(r[2])) return { tool: 'add_event', args: { title: r[1].replace(/^(?:a|an|my) /i, '').replace(/ (?:to|in|on) my calendar$/i, ''), when: r[2].replace(/ (?:to|in|on) my calendar$/i, '') } };
+
+  // Evening summary / daily report
+  if (/^(?:good evening|evening (?:summary|briefing|report)|daily (?:report|summary|productivity report)|productivity report|how was my day|what did i (?:do|get done|finish|accomplish) today|sum up my day|my day so far|end of day(?: report| summary)?)(?:,? (?:jarvis|sir|ma'?am))?$/i.test(low)) return { tool: 'evening_summary', args: {} };
+
   // Custom skill triggers ("/name text" or a trigger phrase).
   for (const sk of customSkills) {
     const cmd = '/' + sk.command;
@@ -50,6 +72,8 @@ export function match(raw, { customSkills = [] } = {}) {
 
   if (/^(stop|cancel|be quiet|quiet|shush|shut up|enough|never ?mind|that'?s enough)$/i.test(low)) return { local: 'stop' };
   if (/^(new (chat|conversation)|start over|clear (the )?chat)$/i.test(low)) return { local: 'newchat' };
+  if (/^(?:start |open |new |go )?(?:a )?(?:private|incognito|secret|off the record)(?: chat| conversation| mode)?$/i.test(low)) return { local: 'private' };
+  if (/^(?:lock|lock (?:jarvis|the app|yourself|up))$/i.test(low)) return { local: 'lock' };
   // Projects: "new project kitchen renovation", "add buy tiles to the kitchen project", "how is the kitchen project going"
   if ((r = t.match(/^(?:new project|create (?:a |new )?project|start (?:a |new )?project|make (?:a |new )?project)(?: called| named|:)? (.{2,80})$/i))) return { tool: 'create_project', args: { name: r[1] } };
   if ((r = t.match(/^add (.+?) to (?:my |the |our )?(.+?) project$/i))) return { tool: 'add_project_task', args: { project: r[2], task: r[1] } };
@@ -58,6 +82,7 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((r = low.match(/^how(?:'s| is| are) (?:my |the |our )?(.+?) project(?: going| doing)?$|^(?:status|progress) (?:of|on) (?:my |the )?(.+?)(?: project)?$/))) return { tool: 'project_status', args: { project: r[1] || r[2] } };
 
   // Mission Control: "mission: plan my trip; write my speech", "new mission …", "open mission control"
+  if (/^(?:open |show )?(?:the )?(?:command cent(?:er|re)|dashboard|my dashboard)$/i.test(low)) return { local: 'open', tab: 'command', say: 'Here’s your Command Center.' };
   if (/^(?:open |show )?mission control$|^(?:my )?missions$/i.test(low)) return { local: 'open', tab: 'mission', say: 'Here’s Mission Control. Give me objectives and watch the agents work.' };
   if ((r = t.match(/^(?:new mission|start (?:a )?mission|mission|missions|give (?:jarvis|you) (?:these )?objectives|objectives?)\s*[:-]?\s+([\s\S]{4,2000})$/i))) return { local: 'mission', goals: r[1] };
 
@@ -68,16 +93,33 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((r = t.match(/^(?:summari[sz]e|sum up|read|explain|what does) (?:this |the )?(?:page|article|link|website)?:? ?(https?:\/\/\S+|\S+\.(?:com|org|net|io|co|edu|gov)\S*)(?: say)?$/i)) && findUrl(r[1])) return { local: 'summarize', url: findUrl(r[1]) };
   if (/^\s*(https?:\/\/\S+|www\.\S+)\s*$/i.test(t) && findUrl(t)) return { tool: 'save_link', args: { url: findUrl(t) }, pasted: true };
 
+  // Creator: slides, spreadsheets, websites and small apps
+  if ((r = t.match(/^(?:make|create|build|generate|write|prepare|design)(?: me)? (?:a |an |some )?(?:presentation|slide ?show|slide deck|slides|deck|powerpoint|keynote)(?: (?:about|on|for|explaining|covering))? (.{3,300})$/i))) return { local: 'create', kind: 'slides', what: r[1] };
+  if ((r = t.match(/^(?:make|create|build|generate|start)(?: me)? (?:a |an )?(?:spreadsheet|table|csv|excel(?: sheet)?|sheet|budget sheet|tracker sheet)(?: (?:of|for|about|with|to track|tracking|listing))? (.{3,300})$/i))) return { local: 'create', kind: 'sheet', what: r[1] };
+  if ((r = t.match(/^(?:make|create|build|design|generate|code)(?: me)? (?:a |an )?(website|web ?site|web page|webpage|landing page|homepage|portfolio site|app|web app|tool|calculator app|game|mini game|small app|program)(?: (?:for|about|that|which|to|where|with|called))? (.{3,400})$/i))) return { local: 'create', kind: /site|page|homepage|portfolio/i.test(r[1]) ? 'site' : 'app', what: r[2] };
+
   // Study: flashcards and comparing documents
   if ((r = t.match(/^(?:make|create|give me|generate) (?:some |me )?flash ?cards(?: (?:about|on|for|of|from) (.{2,160}))?$/i))) return /^(?:a |this |my |the )?(?:document|file|pdf|notes?)$/i.test(r[1] || 'document') ? { local: 'cards', fromFile: true } : { local: 'cards', topic: r[1] };
   if ((r = t.match(/^compare (?:two |these |2 |my )?(?:documents|files|pdfs|docs|versions)(?: (?:for|about|on) (.{2,120}))?$/i))) return { local: 'compare', focus: r[1] || '' };
 
   // Deep research and a team of AI agents
+  if ((r = t.match(/^(?:fact[- ]?check(?: this| that| whether| if)?|verify the claim(?: that)?)\s*:?\s*(.{6,240}?)\??$/i)) && !/^(?:mode|on|off)\b/i.test(r[1])) return { local: 'research', topic: r[1], factCheck: true };
   if ((r = t.match(/^(?:\/research|deep research|do (?:some |deep )?research|research|investigate|find out everything)(?: (?:on|about|into))? (.{3,200})$/i)) && !/^(mode|my )/i.test(r[1])) return { local: 'research', topic: r[1].replace(/^(?:the topic )/i, '') };
   if ((r = t.match(/^(?:\/team|team(?: up)?(?: on)?:?|(?:use|get) (?:a |the )?team(?: of (?:ai )?agents)? (?:to|for|on)|(?:have|let) (?:the |a )?(?:ai )?(?:team|agents) (?:work on|do)) (.{3,400})$/i))) return { local: 'team', task: r[1] };
+  if (/^(?:record|start recording) (?:a |the |this |my )?meeting$|^(?:take )?meeting notes$/.test(low)) return { local: 'open', tab: 'planner', say: 'Tap “Record a voice note” under Voice notes & meetings (ask everyone first). When it’s done: “Turn into text”, then “Meeting notes”.' };
+  if (/^(?:suggest (?:some )?automations?|what (?:should|could|can) i automate\??|automation (?:ideas|suggestions))$/.test(low)) return { local: 'open', tab: 'planner', say: 'Here are your automations. Suggestions based on what you do often are under them (they appear once you’ve done something at the same time on 3 different days).' };
+  // Compact layout (before AI modes, so "turn off compact mode" isn't read as leaving an AI mode)
+  if ((r = low.match(/^(?:(turn on|switch to|use|enable|start|go)|(turn off|exit|leave|disable|stop|end))? ?(?:the )?compact (?:mode|view|layout)(?: (on|off))?$/))) return { local: 'compact', on: !(r[2] || r[3] === 'off') };
   // AI modes: "study mode", "switch to developer mode", "translator mode to French", "normal mode", "exit study mode"
   if ((r = low.match(/^(?:switch to |go to |turn on |enter |use |start |activate |change to )?(?:the )?([a-z ]{3,22}?) mode(?: on)?(?: (?:to|into|in) ([a-z]{3,15}))?$/)) && findMode(r[1])) return { tool: 'set_mode', args: { mode: findMode(r[1]), language: r[2] || '' } };
   if (/^(?:exit|leave|stop|turn off|end|quit) (?:the )?[a-z ]{3,22} mode$|^(?:back to )?normal(?: mode)?$/.test(low)) return { tool: 'set_mode', args: { mode: 'assistant' } };
+  // Live conversation translator: "translate between english and spanish", "live translator", "help me talk to someone in french"
+  if ((r = low.match(/^(?:open |start |use )?(?:the )?(?:live (?:translator|translation|translate)|conversation translator|interpreter(?: mode)?|translate (?:a |my |this )?conversation)(?: (?:between|from) ([a-z]{3,12}) (?:and|to) ([a-z]{3,12}))?$|^translate between ([a-z]{3,12}) and ([a-z]{3,12})$|^help me (?:talk|speak) (?:to|with) (?:someone|somebody|a person|them|him|her) (?:in|who speaks) ([a-z]{3,12})$/))) {
+    const pair = [r[1] || r[3], r[2] || r[4]].map(findLang);
+    const other = findLang(r[5] || '');
+    const set = pair[0] && pair[1] ? { 'translator.a': pair[0], 'translator.b': pair[1] } : other ? { 'translator.b': other } : null;
+    return { local: 'open', tab: 'translate', set, say: 'Here’s the live translator. Each person taps their side and speaks.' };
+  }
   if ((r = low.match(/^translate (?:everything|all|what i say) (?:in)?to ([a-z]{3,15})$/))) return { tool: 'set_mode', args: { mode: 'translator', language: r[1] } };
   if (/^(link|sync|connect|pair) (my |the |all my |both )?(devices|phone|iphone|mac|computer|laptop)( and (my )?(phone|iphone|mac|computer|laptop))?( together)?$|^(sign in|log in|login|signin)$|^(make )?(everything|it) the same on (all )?(my )?(devices|phone and (mac|computer))$/i.test(low)) return { local: 'open', tab: 'sync', say: 'Here’s Link devices. Send from one device and receive on the other, and they’ll match. No account needed.' };
   if (/^(open |show )?(the )?(plugins?|plugin store|add (a )?plugins?)$/i.test(low)) return { local: 'open', tab: 'plugins', say: 'Here are your plugins and the plugin store.' };
@@ -116,9 +158,26 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((r = low.match(/^(start|stop|pause|reset|lap)(?: the| a)? stopwatch$|^stopwatch (start|stop|reset|lap)$|^how long (?:has|is) the stopwatch(?: been)?(?: running)?$/))) return { tool: 'stopwatch', args: { action: (r[1] || r[2] || 'check').replace('pause', 'stop') } };
   if ((r = t.match(/^(?:\/imagine|(?:please )?(?:draw|paint|generate|create|make|imagine|design)(?: me| us)? (?:an? |some )?(?:image|picture|photo|drawing|painting|illustration|art(?:work)?|poster|logo)s? (?:of|showing|with|for)) (.{3,600})$/i))) return { tool: 'generate_image', args: { prompt: r[1] } };
   if (/^(?:download|get|install) (?:the )?(?:picture|image|art) (?:model|ai)$/i.test(low)) return { local: 'pullmodel', model: 'x/flux2-klein', say: 'Downloading FLUX.2 Klein, the free picture model (5.7 GB). You can watch it in AI Models.' };
+  // Mac control: windows, brightness, Trash, apps, storage, duplicates, check-up
+  if ((r = low.match(/^(minimi[sz]e|maximi[sz]e|full ?screen|make (?:it|this|the window) full ?screen|exit full ?screen|center|close)(?: the| this| my)?(?: ([a-z0-9 .]+?))?(?: window)?$/)) && /window|full|minimi|maximi|center/.test(low)) {
+    const w = r[1]; const action = /^minimi/.test(w) ? 'minimize' : /^maximi/.test(w) ? 'maximize' : /exit/.test(w) ? 'exit_fullscreen' : /full/.test(w) ? 'fullscreen' : w === 'center' ? 'center' : 'close';
+    return { tool: 'window_control', args: { action, app: r[2] && !/^(it|this|the|window)$/.test(r[2]) ? r[2] : '' } };
+  }
+  if ((r = low.match(/^(?:put|move|snap|send) (?:the |my )?(.+?)(?: window)? (?:to |on )?(?:the )?(left|right)(?: side| half)?$/)) && !/^(it|this|that)$/.test(r[1]) || (r = low.match(/^(?:put|move|snap) (it|this|that)(?: window)? (?:to |on )?(?:the )?(left|right)(?: side| half)?$/))) return { tool: 'window_control', args: { action: r[2], app: /^(it|this|that|window)$/.test(r[1]) ? '' : r[1] } };
+  if ((r = low.match(/^(?:turn |make )?(?:the )?(?:screen |display )?(?:brightness )?(up|down|brighter|darker|dimmer)(?: the)?(?: screen| brightness| display)?$|^(dim|brighten) (?:the |my )?(?:screen|display)$|^(?:turn|set) (?:the )?brightness (up|down)$/)) && /bright|dim|dark|screen|display/.test(low)) { const d = r[1] || r[2] || r[3]; return { tool: 'set_brightness', args: { direction: /up|bright/.test(d) ? 'up' : 'down', steps: 3 } }; }
+  if (/^(?:empty|clear) (?:the |my )?(?:trash|recycle bin|bin)$/i.test(low)) return { tool: 'empty_trash', args: {} };
+  if (/^(?:what|which) apps (?:are )?(?:open|running)|^(?:show |list )?running apps$|^what'?s using (?:my |the )?(?:memory|ram|cpu)$|^which apps? (?:is |are )?using the most (?:memory|ram|cpu)$/i.test(low)) return { tool: 'running_apps', args: {} };
+  if (/^(?:storage|disk)(?: space)? (?:report|analy[sz]er|analysis)$|^analy[sz]e (?:my )?(?:storage|disk)$|^what'?s (?:taking up|using) (?:my |all my )?(?:space|storage|disk)$|^how much (?:free )?(?:space|storage) do i have(?: left)?$/i.test(low)) return { tool: 'storage_report', args: {} };
+  if ((r = low.match(/^(?:find|look for|check for|show) (?:duplicate|duplicated|double) (?:files|photos|downloads)(?: in (?:my |the )?(.+?))?(?: folder)?$/))) return { tool: 'find_duplicates', args: { folder: r[1] || '' } };
+  if (/^(?:move|delete|remove|trash) (?:the |those |these )?(?:duplicates|duplicate files|extra copies)(?: to (?:the )?trash)?$/i.test(low)) return { tool: 'trash_duplicates', args: {} };
+  if (/^(?:diagnose|check|troubleshoot|scan|health check)(?: on)? (?:my |the )?(?:computer|mac|laptop|system|pc)$|^why is my (?:computer|mac|laptop) (?:so )?slow$|^is my (?:computer|mac) (?:ok|okay|healthy)$/i.test(low)) return { tool: 'diagnose_computer', args: {} };
   if (/^(?:take|grab|capture|save) (?:a )?(?:screenshot|screen ?shot|screen capture)(?: of (?:my |the )?screen)?$|^screenshot$/i.test(low)) return { tool: 'take_screenshot', args: {} };
   if ((r = t.match(/^(?:make|create|add|new) (?:a )?(?:new )?folder(?: called| named)? ["“]?(.+?)["”]?(?: (?:on|in) (?:my |the )?(desktop|documents|downloads|pictures|home(?: folder)?))?$/i))) return { tool: 'create_folder', args: { name: r[1], in: r[2] || '' } };
   if ((r = t.match(/^rename ["“]?(.+?)["”]? (?:to|as) ["“]?(.+?)["”]?$/i))) return { tool: 'rename_file', args: { file: r[1], new_name: r[2] } };
+  // Read aloud
+  if (/^read (?:me )?(?:my |the )?(?:clipboard|what i copied) (?:aloud|out loud|to me)$/.test(low)) return { local: 'readaloud', what: 'clipboard' };
+  if (/^(?:read|say) (?:this|that|it|the last (?:answer|message|reply)|your (?:last )?(?:answer|reply)) (?:aloud|out loud|to me|again)$|^read (?:it )?(?:aloud|out loud)$/.test(low)) return { local: 'readaloud', what: 'last' };
+  if ((r = t.match(/^(?:read|say) (?:aloud|out loud)[:,]?\s+([\s\S]{2,5000})$/i))) return { local: 'readaloud', what: 'text', text: r[1] };
   if (/^(?:what'?s|what is|read|show(?: me)?) (?:on |in )?(?:my |the )?clipboard$|^read what i copied$/i.test(low)) return { tool: 'read_clipboard', args: {} };
   if ((r = t.match(/^copy ["“](.+)["”](?: to (?:my |the )?clipboard)?$/i))) return { tool: 'copy_to_clipboard', args: { text: r[1] } };
   if (/^(?:edit|crop|rotate|fix|touch up|filter) (?:a |my |this |the )?(?:photo|picture|image|pic)$|^(?:open (?:the )?)?(?:photo|picture|image) editor$/i.test(low)) return { local: 'edit' };
@@ -372,6 +431,14 @@ export function reply(intent, res, name = 'JARVIS') {
     case 'create_automation': return `Automation set: **${r.when}** I’ll run “${r.command}”. It runs while JARVIS is open; you can see, pause or delete it in Planner → Automations.`;
     case 'save_link': return r.existed ? `That link was already saved: **${r.title}**.` : `Saved to your links: **${r.title}**. You have ${r.count} saved. Say “my links” to see them${intent.pasted ? ', or “summarize” plus the link for a summary' : ''}.`;
     case 'show_links': return r.links.length ? `Your saved links:\n\n${r.links.map((l) => `- [${l.title}](${l.url})`).join('\n')}` : 'No saved links yet. Paste a link and I’ll keep it.';
+    case 'window_control': return { minimize: `Minimized ${r.app}.`, maximize: `${r.app} now fills the screen.`, fullscreen: `${r.app} is full screen.`, exit_fullscreen: `${r.app} left full screen.`, left: `${r.app} is on the left half.`, right: `${r.app} is on the right half.`, center: `${r.app} is centered.`, close: `Closed the ${r.app} window.` }[r.action] || 'Done.';
+    case 'set_brightness': return `Screen ${r.direction === 'up' ? 'brighter' : 'dimmer'}.`;
+    case 'empty_trash': return `Emptied the Trash (${r.emptied} item${r.emptied === 1 ? '' : 's'}).`;
+    case 'running_apps': return r.apps.length ? `Open apps, biggest first:\n\n${r.apps.slice(0, 12).map((a) => `- **${a.name}**: ${a.memoryMB >= 1024 ? (a.memoryMB / 1024).toFixed(1) + ' GB' : a.memoryMB + ' MB'}${a.cpu >= 5 ? ` · ${Math.round(a.cpu)}% CPU` : ''}`).join('\n')}\n\nSay “quit” and an app’s name to close one.` : 'No apps are open.';
+    case 'storage_report': { const g = (b) => (b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB'); return `**${g(r.free)} free** of ${g(r.total)}.\n\nBiggest folders:\n${r.folders.filter((f) => f.bytes > 0).map((f) => `- ${f.folder}: ${g(f.bytes)}`).join('\n')}${r.largest.length ? `\n\nBiggest files:\n${r.largest.slice(0, 8).map((f) => `- ${f.name}: ${g(f.bytes)}`).join('\n')}` : ''}`; }
+    case 'find_duplicates': { const g = (b) => (b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB'); return r.groups.length ? `Found **${r.groups.length} set${r.groups.length === 1 ? '' : 's'} of duplicates** in ${r.folder.split('/').pop()} (${r.scanned} files checked), wasting ${g(r.wasted)}:\n\n${r.groups.slice(0, 8).map((x) => `- ${x.paths[0].split('/').pop()} × ${x.paths.length}`).join('\n')}\n\nSay “move the duplicates to the Trash” to keep one of each.` : `No duplicates in ${r.folder.split('/').pop()} (${r.scanned} files checked).`; }
+    case 'trash_duplicates': return `Moved ${r.moved} extra cop${r.moved === 1 ? 'y' : 'ies'} to the Trash. You can get them back from there.`;
+    case 'diagnose_computer': return r.findings.length ? `I checked your computer (CPU ${r.cpu}%, memory ${r.memPct}%):\n\n${r.findings.map((f) => `- ${f.level === 'high' ? '🔴' : f.level === 'mid' ? '🟠' : '🟡'} ${f.text} **Fix:** ${f.fix}`).join('\n')}` : `Your computer looks healthy: CPU ${r.cpu}%, memory ${r.memPct}%, plenty of storage. ✅`;
     case 'take_screenshot': return `Screenshot saved to your Desktop: **${r.name}**.`;
     case 'create_folder': return `Made the folder **${r.name}**.`;
     case 'rename_file': return `Renamed **${r.from}** to **${r.name}**.`;
@@ -382,6 +449,13 @@ export function reply(intent, res, name = 'JARVIS') {
     case 'go_home': return `${r.app} is open with directions home (${r.mode}).${r.mode === 'driving' ? ' Drive safe!' : ''} 🏠`;
     case 'set_home_address': return `Saved your home address. It stays on this device. Say “take me home” any time.`;
     case 'morning_briefing': return r.md;
+    case 'evening_summary': return r.md;
+    case 'focus_session': if (r.stopped) return `Focus stopped after **${r.minutes} minutes**.${r.notes?.length ? `\n\nThoughts you parked:\n${r.notes.map((n) => '- ' + n).join('\n')}` : ''}`;
+      return r.running ? (intent.args.action === 'status' ? `**${r.left}** left${r.task ? ` on “${r.task}”` : ''}. You’ve focused ${r.stats?.minutes || 0} minutes today.` : `Focus started: **${r.minutes} minutes**${r.task ? ` on “${r.task}”` : ''}. I’ll keep quiet (urgent things still come through). Say “note: …” to park a thought.`) : 'No focus session is running.';
+    case 'note_distraction': return r.saved === 'focus' ? `Parked it for after your focus session (${r.count} so far). Back to work! 💪` : 'Added it to your to-do list.';
+    case 'get_news': return r.items.length ? `**${r.topic ? `News about ${r.topic}` : 'Headlines'}**\n\n${r.items.map((x) => `- ${x.text.length > 260 ? x.text.slice(0, 257) + '…' : x.text}${x.source === 'BBC News' ? ' _(BBC)_' : ''}`).join('\n')}\n\n_Sources: Wikipedia current events${r.items.some((x) => x.source === 'BBC News') ? ' and BBC News' : ''}._` : `I didn’t find news about “${r.topic}” today.`;
+    case 'add_event': return r.where === 'calendar' ? `Added **${r.title}** to your calendar, ${r.when}. You’ll get an alert 15 minutes before.` : `Here’s **${r.title}** (${r.when}) as a calendar file: open it and tap “Add to Calendar”.`;
+    case 'save_birthday': return `Saved: **${r.name}**’s birthday is ${r.date}. I’ll remind you every year on the day (next: ${r.next}). 🎂`;
     case 'set_home_city': return `Got it — your home city is ${r.name}. Ask “what’s the weather?” any time.`;
     default: return 'Done.';
   }

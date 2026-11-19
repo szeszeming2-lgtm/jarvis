@@ -29,6 +29,7 @@ export async function setHome(place) {
 }
 
 export async function forecast(place) {
+  if ((await import('./store.js')).settings.privacy?.localOnly) throw new Error('Local-only mode is on, so I don’t use the internet. Turn it off in Settings → Privacy & Data.');
   let loc;
   if (place && place.trim()) loc = await geocode(place);
   else if (settings.weather?.lat != null) loc = { name: settings.weather.place, lat: settings.weather.lat, lon: settings.weather.lon };

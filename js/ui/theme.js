@@ -29,6 +29,8 @@ export function applyAppearance() {
   root.classList.toggle('glass-off', a.glass === 'off');
   root.classList.toggle('motion-off', a.motion === 'off');
   root.classList.toggle('contrast-high', !!a.highContrast);
+  root.classList.toggle('compact', !!a.compact);
+  for (const b of ['plain', 'stars', 'aurora', 'circuit']) root.classList.toggle('bg-' + b, a.background === b);
   const reduce = a.motion !== 'full' || matchMedia('(prefers-reduced-motion: reduce)').matches;
   root.classList.toggle('motion-reduced', reduce);
   bus.emit('theme');

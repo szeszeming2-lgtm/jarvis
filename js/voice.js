@@ -15,7 +15,7 @@ const pendingUtterances = new Set();
 const setState = () => bus.emit('voice.state', { ...voice });
 
 // ------------------------------------------------------------------ speaking
-export function speak(text) {
+export function speak(text, { lang = '' } = {}) {
   const clean = toSpeech(text);
   if (!clean || !can('voiceOut')) return;
   const id = uid('u');
@@ -23,7 +23,7 @@ export function speak(text) {
   voice.speaking = true;
   voice.currentText += ' ' + clean.toLowerCase();
   setState();
-  call('speech.speak', { id, text: clean, voice: settings.voice.voice, rate: Number(settings.voice.rate), pitch: Number(settings.voice.pitch), volume: Number(settings.voice.volume) })
+  call('speech.speak', { id, text: clean, voice: lang ? '' : settings.voice.voice, lang, rate: Number(settings.voice.rate), pitch: Number(settings.voice.pitch), volume: Number(settings.voice.volume) })
     .catch((e) => { pendingUtterances.delete(id); finishIfDone(); bus.emit('toast', { text: 'Voice error: ' + e.message, bad: true }); });
 }
 
@@ -102,7 +102,7 @@ export async function ensurePermission() {
   return p;
 }
 
-export async function listen(mode = 'command') {
+export async function listen(mode = 'command', { locale = '' } = {}) {
   if (!can('voiceIn')) throw new Error('Voice input needs the JARVIS desktop app (or a browser with speech recognition).');
   if (mode === 'command' && voice.speaking) stopSpeaking();
   await ensurePermission();
@@ -111,7 +111,7 @@ export async function listen(mode = 'command') {
   const ww = [settings.voice.wakeWord || settings.assistantName].map((w) => w.toLowerCase().trim()).filter(Boolean);
   if (mode === 'bargein') ww.push('stop', 'wait', 'hold on', 'cancel');
   await call('listen.start', {
-    mode: mode === 'bargein' ? 'wake' : mode, locale: settings.voice.locale, offlineOnly: !!settings.voice.offlineOnly,
+    mode: mode === 'bargein' ? 'wake' : mode, locale: locale || settings.voice.locale, offlineOnly: !!settings.voice.offlineOnly,
     wakeWords: ww, silenceMs: Number(settings.voice.silenceMs) || 1400,
     gate: { low: 0.012, normal: 0.003, high: 0 }[settings.voice.sensitivity || 'normal'] ?? 0.003, // quiet sounds below this are ignored
   });

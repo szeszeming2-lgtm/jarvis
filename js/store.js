@@ -3,13 +3,49 @@
 import { call } from './host.js';
 import { bus, mergeDeep, debounce } from './util.js';
 
+// ---------------------------------------------------------------- encryption at rest (App lock)
+// When the app lock is on, everything except the lock settings and reminders (which must
+// fire even before you unlock) is stored encrypted with AES-GCM. The data key is random;
+// your PIN (and optional spoken passphrase) only unlock it, via PBKDF2.
+let dataKey = null;
+export const isUnlocked = () => !!dataKey;
+export const setDataKey = (k) => { dataKey = k; };
+const PLAIN = (key) => key === 'lock' || key === 'reminders' || key.startsWith('weather-cache');
+const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function seal(text) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, dataKey, new TextEncoder().encode(text)));
+  return JSON.stringify({ jenc: 1, iv: b64(iv), d: b64(ct) });
+}
+async function unseal(raw) {
+  const o = JSON.parse(raw);
+  if (!dataKey) throw Object.assign(new Error('JARVIS is locked.'), { locked: true });
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(o.iv) }, dataKey, unb64(o.d)));
+}
+const isSealed = (raw) => typeof raw === 'string' && raw.startsWith('{"jenc":1');
+
 export async function read(key, fallback = null) {
   try {
-    const raw = await call('store.read', { key });
-    return raw == null ? fallback : JSON.parse(raw);
+    let raw = await call('store.read', { key });
+    if (raw == null) return fallback;
+    if (isSealed(raw)) raw = await unseal(raw);
+    return JSON.parse(raw);
   } catch (e) {
     console.warn('read failed', key, e);
     return fallback;
+  }
+}
+
+/** Re-save every stored item encrypted (lock on) or plain (lock off). */
+export async function rewriteAll(encrypt) {
+  const keys = await list('');
+  for (const k of keys) {
+    if (PLAIN(k)) continue;
+    let raw = await call('store.read', { key: k });
+    if (raw == null) continue;
+    if (isSealed(raw)) raw = await unseal(raw);
+    await call('store.write', { key: k, value: encrypt ? await seal(raw) : raw });
   }
 }
 
@@ -24,7 +60,8 @@ export function tombstone(...keys) {
 export function setTombstones(t) { tombs = t; return write('tombstones', t); }
 
 export async function write(key, value) {
-  return call('store.write', { key, value: JSON.stringify(value) });
+  const text = JSON.stringify(value);
+  return call('store.write', { key, value: dataKey && !PLAIN(key) ? await seal(text) : text });
 }
 
 export async function remove(key) { return call('store.remove', { key }); }
@@ -49,6 +86,9 @@ export const DEFAULTS = {
   customInstructions: '',
   replyLanguage: 'auto',
   instantCommands: true,
+  search: { meaning: false, meaningDownloaded: false },
+  translator: { a: '', b: '', speak: true },
+  autoSuggest: { dismissed: [] },
   smartTitles: false,
   launchAtLogin: false,
   ai: {
@@ -74,7 +114,7 @@ export const DEFAULTS = {
     offlineOnly: true,
     wake: false,
     wakeWord: 'jarvis',
-    continuous: false,         // keep listening after a spoken reply
+    continuous: true,          // keep listening after a spoken reply (say “that’s all” to stop)
     bargeIn: false,            // say "stop" to interrupt (experimental)
     silenceMs: 1400,
   },
@@ -83,15 +123,18 @@ export const DEFAULTS = {
   profile: { phone: '', home: '', travel: 'd', maps: 'auto' },   // home address: only on this device, for "take me home"
   weather: { place: '', lat: null, lon: null, units: 'auto' },          // only stored on this device; used for "text me"
   reminders: { system: true, textMe: true },      // desktop app: also add to the Reminders app; text you when one is due
-  briefing: { on: true, time: '07:30', text: true, speak: true, last: '' },
-  mode: 'assistant', modeLang: 'Spanish',   // AI mode (modes.js) and the translator's target language
+  briefing: { on: true, time: '07:30', text: true, speak: true, last: '', evening: true, eveningTime: '21:00', lastEvening: '' },
+  mode: 'assistant', modeLang: 'Spanish',
+  privacy: { localOnly: false },
+  notify: { quiet: false, quietStart: '22:00', quietEnd: '07:00', newApps: false },
+  emergency: { contacts: [], number: '' },   // AI mode (modes.js) and the translator's target language
   permissions: {
     apps: 'allow', web: 'allow', findFiles: 'allow', readFiles: 'ask', writeFiles: 'ask',
     organize: 'ask', system: 'ask', shortcuts: 'ask', commands: 'off', quitApps: 'ask',
     reminders: 'allow', messages: 'ask', calls: 'ask', screen: 'ask',
   },
   appearance: {
-    theme: 'reactor', accent: '', visualizer: 'reactor', motion: 'full', glass: 'full', fontScale: 1,
+    theme: 'reactor', accent: '', visualizer: 'reactor', motion: 'full', glass: 'full', fontScale: 1, compact: false, background: 'grid',
   },
   home: {
     sidebar: true, hud: true, suggestions: true,

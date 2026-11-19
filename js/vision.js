@@ -32,6 +32,7 @@ export async function library() {
 /** Download (first time) and start the model. onProgress({progress 0..1, text}). */
 export function load(onProgress = () => {}) {
   if (model) return Promise.resolve();
+  if (settings.privacy?.localOnly && !downloaded()) return Promise.reject(new Error('Local-only mode is on, so the picture AI can’t be downloaded. Turn it off in Settings → Privacy & Data.'));
   if (loading) return loading;
   state.status = 'loading'; state.error = '';
   loading = (async () => {

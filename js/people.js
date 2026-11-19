@@ -20,11 +20,12 @@ export function find(name) {
 export const HANDLES = ['discord', 'telegram', 'skype', 'teams', 'messenger', 'whatsapp'];
 
 /** Add or update someone. phone is optional when an app handle is given. */
-export function upsert({ name, phone = '', aliases = [], allowEmpty = false, ...handles }) {
+export function upsert({ name, phone = '', aliases = [], allowEmpty = false, birthday = '', ...handles }) {
   name = String(name || '').trim().replace(/^(my|our)\s+/i, '');
   phone = String(phone || '').trim();
   const extra = Object.fromEntries(Object.entries(handles).filter(([k, v]) => HANDLES.includes(k) && String(v || '').trim()).map(([k, v]) => [k, String(v).trim()]));
   if (!name) throw new Error('A name is needed.');
+  if (birthday) extra.birthday = birthday;
   if (!allowEmpty && !phone && !Object.keys(extra).length && !find(name)) throw new Error('A number (or an app username) is needed.');
   if (phone && !/^\+?[\d\s().-]{5,20}$/.test(phone) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(phone)) throw new Error('That number doesn’t look right.');
   const existing = find(name);

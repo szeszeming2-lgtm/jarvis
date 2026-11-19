@@ -34,7 +34,7 @@ export function add(url, { note = '', title = '' } = {}) {
 
 /** Mac app: read the page title in the background. */
 async function fetchTitle(l) {
-  if (!can('webFetch')) return;
+  if (!can('webFetch') || (await import('./store.js')).settings.privacy?.localOnly) return;
   try {
     const r = await call('web.get', { url: l.url });
     const doc = new DOMParser().parseFromString(String(r.text || '').slice(0, 300000), 'text/html');

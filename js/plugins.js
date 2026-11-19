@@ -23,6 +23,12 @@ export const PLUGINS = [
   { id: 'look', name: 'Circle to Ask', icon: 'lasso', groups: ['look'], tryText: 'what is this', desc: 'Take a photo, pick a picture or grab your screen, circle anything and ask about it. Runs on this device.' },
   { id: 'briefing', name: 'Morning Briefing', icon: 'coffee', groups: ['briefing'], tryText: 'good morning', desc: 'Every morning: the weather and what you need to do today (calendar, reminders, to-do list). Spoken, and texted to you from the Mac app.' },
   { id: 'home', name: 'Take Me Home', icon: 'home', groups: ['home'], tryText: 'take me home', open: 'general', desc: 'Directions home from wherever you are, in Apple or Google Maps. Your address stays on this device.' },
+  { id: 'news', name: 'News', icon: 'globe', groups: ['news'], tryText: 'news', desc: 'Today’s headlines from Wikipedia’s current events (plus BBC News in the Mac app). Free, no account.' },
+  { id: 'focus', name: 'Focus Mode', icon: 'target', groups: ['focus'], tryText: 'start a 25 minute focus session', desc: 'Timed focus sessions. Non-urgent alerts wait until you’re done; say “note: …” to park a thought for later.' },
+  { id: 'creator', name: 'Creator', icon: 'wand', groups: ['creator'], tryText: 'make slides about the solar system', desc: 'The AI makes real files: PowerPoint slides, spreadsheets (CSV), websites and small web apps.' },
+  { id: 'livetranslate', name: 'Live Translator', icon: 'language', groups: ['translator'], tryText: 'translate between English and Spanish', open: 'translate', desc: 'Talk with someone in another language: each person speaks, JARVIS translates and says it out loud.' },
+  { id: 'missions', name: 'Mission Control', icon: 'zap', groups: ['missions'], tryText: '', open: 'mission', desc: 'Give JARVIS several goals; AI agents plan and work on them, and ask before doing anything.' },
+  { id: 'research', name: 'Research & Fact Check', icon: 'search', groups: ['research'], tryText: 'fact check the Great Wall of China is visible from space', desc: 'Deep research with sources, and “fact check …” for a clear True / False verdict.' },
   { id: 'translate', name: 'Translator', icon: 'language', skill: 'translate', tryText: '/translate Spanish: good morning', desc: 'Translate anything into another language.' },
 ];
 

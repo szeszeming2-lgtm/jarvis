@@ -21,6 +21,8 @@ import * as planner from './planner.js';
 import * as links from './links.js';
 import './ui/links.js';
 import './ui/missions.js';
+import './ui/command.js';
+import './ui/translate.js';
 import * as projects from './projects.js';
 import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
@@ -54,7 +56,12 @@ async function boot() {
   window.__deviceRam = hi.ramGB || 8;
   document.documentElement.classList.toggle('native', isNative);
   if (hi.titlebar) document.documentElement.style.setProperty('--titlebar', hi.titlebar + 'px');
+  // App lock: nothing private is read until the right PIN or passphrase is given.
+  const lockMod = await import('./lock.js');
+  if ((await lockMod.config()).on) await lockMod.showLock({ firstStart: true });
   await loadSettings();
+  // Hands-free conversation is the default now: turn it on once for everyone (it can still be turned off in Settings → Voice).
+  if (!settings.voice.continuousOn) { set('voice.continuous', true); set('voice.continuousOn', true); }
   // Phones and tablets can't reach Ollama from this website, so they always run the AI on the device itself.
   if (!isNative && isMobile() && settings.ai.provider !== 'phone') { settings.ai.provider = 'phone'; settings.ai.model = ''; }
   applyAppearance();
@@ -63,8 +70,8 @@ async function boot() {
   // Mission Control: pick up missions where they stopped; tell the user when one needs them.
   import('./missions.js').then(async (MS) => {
     await MS.load(); MS.kick();
-    bus.on('missions', (list) => { for (const m of list || []) { if (['awaiting-approval', 'waiting'].includes(m.status) && !m._told) { m._told = true; toast(`Mission “${m.goal.slice(0, 40)}” needs your OK`, { icon: 'zap', ms: 6000 }); } if (m.status !== 'awaiting-approval' && m.status !== 'waiting') m._told = false; } });
-    bus.on('mission.done', (m) => toast(`Mission done: ${m.goal.slice(0, 50)}`, { icon: 'check', ms: 8000 }));
+    bus.on('missions', (list) => { for (const m of list || []) { if (['awaiting-approval', 'waiting'].includes(m.status) && !m._told) { m._told = true; (app.notify || ((x) => toast(x)))(`Mission “${m.goal.slice(0, 40)}” needs your OK`, '', { kind: 'mission', icon: 'zap' }); } if (m.status !== 'awaiting-approval' && m.status !== 'waiting') m._told = false; } });
+    bus.on('mission.done', (m) => (app.notify || ((x) => toast(x)))(`Mission done: ${m.goal.slice(0, 50)}`, '', { kind: 'mission', icon: 'check' }));
   }).catch(console.error);
   // Signed in with a secret phrase? Keep this device in step with the others.
   import('./livesync.js').then((ls) => ls.start()).catch(console.error);
@@ -91,6 +98,7 @@ async function boot() {
   bus.on('session.title', (s) => { if (s === sessions.state.current) $('#sessionTitle').value = s.title; });
   bus.on('wizard.open', openWizard);
   bus.on('look.start', (d) => look.start(d));
+  lockMod.startAutoLock();
   // Mac app: floating orb, always-on-top, clipboard history (memory only) as set last time.
   if (can('orb')) call('app.setWindowOptions', { orb: !!settings.appearance.orb, onTop: !!settings.appearance.onTop }).catch(() => {});
   if (can('clipboardHistory') && settings.clipboardHistory) call('clipboard.setHistory', { on: true }).catch(() => {});
@@ -100,16 +108,54 @@ async function boot() {
     await assistant.send(action.text);
     return { ok: true };
   }); }).catch(console.error);
+  // Evening summary: what got done today and what's tomorrow.
+  import('./briefing.js').then((b) => b.startEvening(async (brief) => {
+    assistant.announce(brief.md, { speak: settings.briefing?.speak !== false });
+    (app.notify || ((x) => toast(x)))('Your evening summary is ready.', '', { kind: 'briefing', icon: 'moon', priority: 'low' });
+  })).catch(console.error);
   // Morning briefing, once a day after the set time (and on the first open after it).
   import('./briefing.js').then((b) => b.startSchedule(async (brief) => {
     assistant.announce(brief.md, { speak: settings.briefing?.speak !== false });
-    toast('Your morning briefing is ready.', { icon: 'coffee', ms: 6000 });
+    (app.notify || ((x) => toast(x)))('Your morning briefing is ready.', '', { kind: 'briefing', icon: 'coffee' });
   })).catch(console.error);
+  // Notification center: reminders are urgent; the rest waits during focus and quiet hours.
+  const notify = await import('./notify.js');
+  await notify.load();
+  notify.setFocusCheck(() => planner.focusState().running);
+  app.notify = (title, body, opts = {}) => notify.notify(title, body, { ...opts, show: (n) => toast(n.body ? `${n.title} ${n.body}` : n.title, { icon: n.icon, ms: n.priority === 'high' ? 15000 : 6000 }) });
   bus.on('reminder.due', (r) => {
     const text = r.missed ? `While I was closed, a reminder came due: ${r.text}.` : `Reminder: ${r.text}.`;
-    toast(text, { icon: 'bell', ms: 15000 });
+    app.notify(text, '', { priority: 'high', kind: 'reminder', icon: 'bell' });
     if (settings.voice.speak !== 'never') { voice.stopSpeaking(); voice.speak(text); }
     app.viz.kick(1.2);
+  });
+  bus.on('focus.end', (f) => {
+    const n = notify.releaseHeld();
+    const text = `${f.completed ? 'Focus session done' : 'Focus stopped'}: ${f.minutes} minutes${f.task ? ` on ${f.task}` : ''}.`;
+    assistant.announce(`**${text}**${f.notes.length ? `\n\nThoughts you parked:\n${f.notes.map((x) => '- ' + x).join('\n')}` : ''}${n ? `\n\n${n} notification${n === 1 ? '' : 's'} waited for you: open the bell to see ${n === 1 ? 'it' : 'them'}.` : ''}${f.completed ? '\n\nTake a 5-minute break. 🧘' : ''}`, { speak: f.completed && settings.voice.speak !== 'never' });
+    call('app.chime', { kind: 'wake' }).catch(() => {});
+  });
+  // When quiet hours end, show what waited (focus sessions release their own).
+  setInterval(() => {
+    if (notify.quietNow() || planner.focusState().running) return;
+    const n = notify.releaseHeld();
+    if (n) toast(`${n} notification${n === 1 ? '' : 's'} waited during quiet hours. Open the bell to see ${n === 1 ? 'it' : 'them'}.`, { icon: 'bell', ms: 8000 });
+  }, 60000);
+  // Mac: tell me when a new app is installed or opened for the first time (off by default).
+  if (can('macControl')) {
+    const syncNewApps = () => call('mac.newAppAlerts', { on: !!settings.notify?.newApps }).catch(() => {});
+    syncNewApps();
+    bus.on('settings', (d) => { if (d.path === 'notify.newApps' || d.path === 'notify') syncNewApps(); });
+    import('./host.js').then(({ events }) => events.on('mac.newApp', (d) => app.notify(`New app opened for the first time: ${d?.name || 'an app'}`, 'If you didn’t install it, you can check it in Finder → Applications.', { kind: 'security', icon: 'shield' })));
+  }
+  // Bell: history of everything JARVIS told you.
+  const bell = $('#bellBtn');
+  const drawBell = () => { const u = notify.unread(); bell.classList.toggle('has', u > 0); bell.dataset.count = u > 9 ? '9+' : u || ''; };
+  bus.on('notifications', drawBell); drawBell();
+  bell.addEventListener('click', () => {
+    const list = notify.all().slice(0, 12);
+    menu(bell, [{ header: list.length ? 'Notifications' : 'No notifications yet' }, ...list.map((n) => ({ label: n.title, sub: new Date(n.at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }), icon: n.icon || 'bell' })), ...(list.length ? ['sep', { label: 'Clear all', icon: 'trash', action: () => notify.clear() }] : [])], { align: 'right' });
+    notify.markAllRead();
   });
   bus.on('wizard.closed', () => { renderWelcome(); syncWake(); $('#input').focus(); });
   bus.on('timer.done', (d) => { const text = `Your ${d.label ? d.label + ' ' : ''}timer is done.`; toast(text, { icon: 'clock', ms: 8000 }); if (settings.voice.speak !== 'never') voice.speak(text); app.viz.kick(1); });
@@ -331,6 +377,8 @@ function wireComposer() {
   send.addEventListener('click', () => (assistant.run.busy || voice.voice.speaking ? stopAll() : submit()));
   $('#attachBtn').addEventListener('click', attach);
   $('#lookBtn').addEventListener('click', () => look.start({ question: input.value.trim() }));
+  $('#privateChatBtn')?.addEventListener('click', () => assistant.send('private chat'));
+  bus.on('session', (s) => document.documentElement.classList.toggle('chat-private', !!s?.private));
   // Search everything: button or ⌘K / Ctrl+K.
   const openSearch = () => import('./ui/search.js').then((m) => m.openSearch());
   $('#searchBtn').addEventListener('click', openSearch);
@@ -541,6 +589,14 @@ function wireVoice() {
     $('#partial').hidden = true;
     if (voice.voice.capture) { const f = voice.voice.capture; voice.voice.capture = null; f(text); return; }
     if (assistant.run.confirmResolvers.size) { bus.emit('voice.final.confirm', text); return; }
+    // Ending a hands-free conversation: "that's all", "thanks, that's it", "goodbye", "never mind".
+    if (/^(?:ok(?:ay)?,? )?(?:thanks?(?: you)?,? )?(?:that'?s (?:all|it|everything)|goodbye|bye(?: bye)?|never ?mind|stop listening|nothing(?: else)?|no thanks?)[.!]?$/i.test(text.trim())) {
+      assistant.run.lastViaVoice = false;
+      setOrb('idle', '');
+      if (settings.voice.speak !== 'never') voice.speak(/bye/i.test(text) ? 'Goodbye.' : 'Okay.');
+      setTimeout(syncWake, 900);
+      return;
+    }
     assistant.send(text, { viaVoice: true });
   });
   bus.on('voice.nothing', () => { setOrb('idle', 'Didn’t catch that'); setTimeout(() => syncWake(), 600); });

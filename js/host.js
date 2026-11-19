@@ -91,9 +91,12 @@ const browser = {
     });
     return list.map((v) => ({ id: v.voiceURI, name: v.name, lang: v.lang, quality: v.localService ? 'default' : 'online' }));
   },
-  'speech.speak': async ({ id, text, voice, rate = 1, pitch = 1, volume = 1 }) => {
+  'speech.speak': async ({ id, text, voice, lang = '', rate = 1, pitch = 1, volume = 1 }) => {
     const u = new SpeechSynthesisUtterance(text);
-    const v = speechSynthesis.getVoices().find((x) => x.voiceURI === voice);
+    const all = speechSynthesis.getVoices();
+    // A language asked for (the translator): a voice that speaks it, best local one first.
+    const v = lang ? all.filter((x) => x.lang.replace('_', '-').toLowerCase().startsWith(lang.toLowerCase().split('-')[0])).sort((a, b) => (b.lang.toLowerCase() === lang.toLowerCase()) - (a.lang.toLowerCase() === lang.toLowerCase()) || b.localService - a.localService)[0] : all.find((x) => x.voiceURI === voice);
+    if (lang) u.lang = lang;
     if (v) u.voice = v;
     u.rate = Math.max(0.2, rate * 2); u.pitch = pitch; u.volume = volume; // rate uses the 0..1 scale (0.5 = normal)
     u.onstart = () => events.emit('speech.start', { id });

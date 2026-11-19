@@ -4,7 +4,7 @@ import { read, write, tombstone } from './store.js';
 import { bus, uid } from './util.js';
 
 let data = { habits: [], goals: [], money: [], budget: { monthly: 0 }, stopwatch: { start: 0, elapsed: 0, laps: [] } };
-export async function load() { data = { ...data, ...(await read('planner', {})) }; return data; }
+export async function load() { data = { ...data, ...(await read('planner', {})) }; if (data.focusNow) setTimeout(armFocus, 0); return data; }
 const save = () => { write('planner', data).catch(console.error); bus.emit('planner', data); };
 export const all = () => data;
 
@@ -118,4 +118,49 @@ export function fmtMs(ms) {
 export function spokenTime(ms) {
   const s = Math.round(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
   return [h ? `${h} hour${h === 1 ? '' : 's'}` : '', m ? `${m} minute${m === 1 ? '' : 's'}` : '', `${r} second${r === 1 ? '' : 's'}`].filter(Boolean).join(' ');
+}
+
+// ---------------------------------------------------------------- focus sessions (Pomodoro)
+// While focusing, JARVIS holds back non-urgent alerts (see notify.js) and saves stray
+// thoughts ("note: call mom later") so you can deal with them afterwards.
+let focusTimer = 0;
+export function focusState() {
+  const f = data.focusNow;
+  if (!f) return { running: false };
+  const leftMs = Math.max(0, f.start + f.minutes * 60000 - Date.now());
+  const m = Math.floor(leftMs / 60000), s = Math.floor((leftMs % 60000) / 1000);
+  return { running: true, task: f.task, minutes: f.minutes, leftMs, left: `${m}:${String(s).padStart(2, '0')}`, notes: f.notes };
+}
+export function startFocus(minutes = 25, task = '') {
+  if (data.focusNow) return focusState();
+  data.focusNow = { start: Date.now(), minutes: Math.max(1, Math.min(180, Number(minutes) || 25)), task: String(task || '').slice(0, 120), notes: [] };
+  save(); armFocus(); bus.emit('focus', focusState());
+  return focusState();
+}
+export function addDistraction(text) {
+  if (!data.focusNow) return null;
+  data.focusNow.notes.push({ text: String(text).slice(0, 300), at: Date.now() }); save();
+  return data.focusNow.notes.length;
+}
+/** End the session (finished or stopped early). Returns a summary. */
+export function stopFocus(done = false) {
+  const f = data.focusNow;
+  if (!f) return null;
+  clearInterval(focusTimer);
+  const minutes = Math.round(Math.min(f.minutes, (Date.now() - f.start) / 60000));
+  (data.focus ||= []).push({ start: f.start, minutes, planned: f.minutes, task: f.task, completed: done, notes: f.notes.length });
+  data.focus = data.focus.slice(-500);
+  data.focusNow = null; save();
+  const summary = { minutes, task: f.task, completed: done, notes: f.notes.map((n) => n.text) };
+  bus.emit('focus.end', summary); bus.emit('focus', focusState());
+  return summary;
+}
+export function armFocus() {
+  clearInterval(focusTimer);
+  if (!data.focusNow) return;
+  focusTimer = setInterval(() => { if (focusState().leftMs <= 0) stopFocus(true); }, 1000);
+}
+export function focusStats(days = 7) {
+  const since = Date.now() - days * 86400000, list = (data.focus || []).filter((f) => f.start >= since);
+  return { sessions: list.length, minutes: list.reduce((s, f) => s + f.minutes, 0), completed: list.filter((f) => f.completed).length };
 }

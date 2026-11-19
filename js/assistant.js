@@ -1,6 +1,6 @@
 // The conversation engine: instant commands, prompt building, streaming from the
 // local model, the tool loop with confirmations, and spoken replies.
-import { settings, logActivity } from './store.js';
+import { settings, set as setSetting, logActivity } from './store.js';
 import * as ollama from './ollama.js';
 import * as sessions from './sessions.js';
 import * as memory from './memory.js';
@@ -83,7 +83,42 @@ export async function send(text, { viaVoice = false, attachment = null, images =
     if (speakOn) voiceMod.speak(reply);
     return;
   }
+  // Features you can switch off in Settings → Plugins. (Emergency help is never switched off.)
+  const featureGroup = intent?.local === 'open' && intent.tab === 'translate' ? 'translator' : { create: 'creator', mission: 'missions', research: 'research', team: 'research' }[intent?.local];
+  if (featureGroup && (settings.skills?.disabledGroups || []).includes(featureGroup)) {
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    push({ role: 'assistant', content: 'That feature is turned off. You can turn it back on in Settings → Plugins.', instant: true, buttons: [{ label: 'Open Plugins', open: 'plugins' }] });
+    return;
+  }
   if (intent?.local === 'research' || intent?.local === 'team') { await runDeep(intent, text, viaVoice, speakOn); return; }
+  if (intent?.local === 'emergency') {
+    // Emergency: big, simple buttons. Every call or text still asks you first (no accidental calls).
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    const { emergencyNumber } = await import('./emergency.js');
+    const num = emergencyNumber();
+    const names = settings.emergency?.contacts || [];
+    const reply = `🚨 **Emergency.** If someone is in danger, call **${num}** now.${names.length ? ` Your emergency contacts: ${names.join(', ')}.` : ' (Add emergency contacts in Settings → General so I can call or text them quickly.)'}`;
+    push({ role: 'assistant', content: reply, instant: true, emergency: true, buttons: [{ label: `Call ${num}`, send: `dial ${num}` }, ...names.slice(0, 3).map((n) => ({ label: `Call ${n}`, send: `call ${n}` })), ...(names.length ? [{ label: 'Text them my location', send: 'text my location to my emergency contacts' }] : [])] });
+    if (speakOn) voiceMod.speak(`If someone is in danger, call ${num} now.`);
+    return;
+  }
+  if (intent?.local === 'sharelocation') {
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    try {
+      const { locationText } = await import('./emergency.js');
+      const msgText = await locationText();
+      const names = intent.to === 'emergency' ? settings.emergency?.contacts || [] : [intent.to];
+      if (!names.length) throw new Error('Add emergency contacts in Settings → General first.');
+      for (const n of names) {
+        const t = push({ role: 'tool', tool_name: 'send_text', instant: true, display: 'Working…', running: true, args: { to: n } });
+        const res = await tools.execute('send_text', { to: n, message: msgText }, { confirm, source: 'instant' });
+        Object.assign(t, { running: false, ok: res.ok, declined: res.declined, display: tools.summary('send_text', res, { to: n }) }); update(t);
+      }
+      push({ role: 'assistant', content: 'Done. Each text was shown to you before sending.', instant: true });
+    } catch (e) { push({ role: 'assistant', content: e.message, instant: true }); }
+    return;
+  }
+  if (intent?.local === 'create') { await runCreate(intent, text, viaVoice, speakOn); return; }
   if (intent?.local === 'cards' || intent?.local === 'compare') { await runStudy(intent, text, viaVoice, speakOn); return; }
   if (intent?.local === 'mission') {
     const MS = await import('./missions.js');
@@ -112,8 +147,35 @@ export async function send(text, { viaVoice = false, attachment = null, images =
     return;
   }
   if (intent?.local === 'edit') { import('./ui/imageedit.js').then((m) => m.openEditor()); return; }
+  if (intent?.local === 'readaloud') {
+    // Speak something out loud, even when spoken replies are off.
+    let say = intent.text || '';
+    try {
+      if (intent.what === 'clipboard') { const r = await tools.execute('read_clipboard', {}, { confirm, source: 'instant' }); if (!r.ok) throw new Error(r.error); say = r.text; }
+      if (intent.what === 'last') say = [...(sessions.state.current?.messages || [])].reverse().find((m) => m.role === 'assistant' && m.content)?.content || '';
+      if (!say.trim()) throw new Error('There’s nothing to read yet.');
+    } catch (e) { push({ role: 'user', content: text }); push({ role: 'assistant', content: e.message, instant: true }); return; }
+    if (intent.what !== 'last') { push({ role: 'user', content: text, voice: viaVoice || undefined }); push({ role: 'assistant', content: `🔊 Reading ${intent.what === 'clipboard' ? 'your clipboard' : 'it'} aloud${say.length > 4000 ? ' (the first part)' : ''}. Press Esc to stop.`, instant: true }); }
+    voiceMod.stopSpeaking();
+    voiceMod.speak(say.slice(0, 4000));
+    return;
+  }
+  if (intent?.local === 'compact') {
+    setSetting('appearance.compact', !!intent.on);
+    (await import('./ui/theme.js')).applyAppearance();
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    push({ role: 'assistant', content: intent.on ? 'Compact mode is on: more room for the conversation. Say “compact mode off” to go back.' : 'Compact mode is off.', instant: true });
+    return;
+  }
+  if (intent?.local === 'lock') { const L = await import('./lock.js'); await L.config(); if (L.isOn()) L.lockNow(); else push({ role: 'assistant', content: 'The app lock isn’t set up. Turn it on in Settings → Privacy & Data (you’ll choose a PIN).', instant: true }); return; }
+  if (intent?.local === 'private') {
+    sessions.create({ private: true });
+    push({ role: 'assistant', content: '🔒 **Private chat.** Nothing here is saved to your history or remembered, and it disappears when you start a new chat.', instant: true });
+    return;
+  }
   if (intent?.local === 'open') {
     push({ role: 'user', content: text, voice: viaVoice || undefined });
+    if (intent.set) for (const [k, v] of Object.entries(intent.set)) setSetting(k, v);
     push({ role: 'assistant', content: intent.say || 'Here it is.', instant: true });
     if (speakOn) voiceMod.speak(intent.say || '');
     import('./ui/sheets.js').then((m) => m.openSheet(intent.tab));
@@ -599,6 +661,32 @@ export function say(userText, reply, { viaVoice = false, images = [] } = {}) {
   if (speakThisTurn(viaVoice)) voiceMod.speak(reply);
 }
 
+/** Make a real file: slides (.pptx), a spreadsheet (.csv) or a website/app (.html). */
+async function runCreate(intent, text, viaVoice, speakOn) {
+  push({ role: 'user', content: text, voice: viaVoice || undefined });
+  if (ollama.engine.status !== 'online') await ollama.detect();
+  if (ollama.engine.status !== 'online' || !settings.ai.model) { push({ role: 'assistant', content: '', errorKind: 'nomodel', error: 'Making files needs the AI. Get a free model first.' }); return; }
+  const C = await import('./creator.js');
+  const msg = push({ role: 'assistant', content: '', pending: true, model: settings.ai.model, steps: [], loading: 'Starting' });
+  const onStep = (t) => { msg.steps.push(t); msg.loading = t; update(msg); };
+  setBusy(true);
+  try {
+    if (intent.kind === 'slides') {
+      const r = await C.makeSlides(intent.what, { onStep });
+      msg.content = `Made **${r.title}**: a PowerPoint file with ${r.slides + 1} slides${r.downloaded ? ' (in your Downloads)' : r.path ? ` (${r.path})` : ''}. It opens in Keynote, PowerPoint or Google Slides.\n\nSlides: ${r.outline.join(' · ')}${r.notes.length ? `\n\n**What to say:**\n${r.notes.map((n) => '- ' + n).join('\n')}` : ''}`;
+    } else if (intent.kind === 'sheet') {
+      const r = await C.makeSpreadsheet(intent.what, { onStep });
+      msg.content = `Made a spreadsheet with ${r.rows} rows${r.downloaded ? ' (CSV file in your Downloads)' : r.path ? ` (${r.path})` : ''}. It opens in Excel, Numbers or Google Sheets.\n\n${r.table}`;
+    } else {
+      const r = await C.buildPage(intent.what, { app: intent.kind === 'app', onStep });
+      msg.content = `Built **${r.title}** as one web page${r.downloaded ? ' (in your Downloads: open it in your browser)' : r.path ? ` and opened it in your browser (${r.path})` : ''}. Want changes? Tell me what to change and I’ll rebuild it.`;
+      msg.htmlPreview = r.html;
+    }
+  } catch (e) { msg.error = /Not saved/.test(e.message) ? 'Not saved: the save was cancelled.' : friendlyError(e.message); msg.errorKind = 'deep'; }
+  finally { Object.assign(msg, { pending: false, loading: '' }); update(msg); setBusy(false); bus.emit('turn.done', { viaVoice }); }
+  if (speakOn && msg.content) voiceMod.speak(msg.content.split('\n\n')[0]);
+}
+
 /** Flashcards (from a topic or a document) and comparing two documents. */
 async function runStudy(intent, text, viaVoice, speakOn) {
   push({ role: 'user', content: text, voice: viaVoice || undefined });
@@ -638,7 +726,7 @@ async function runDeep(intent, text, viaVoice, speakOn) {
   if (ollama.engine.status !== 'online' || !settings.ai.model) { push({ role: 'assistant', content: '', errorKind: 'nomodel', error: 'Research and the agent team need the AI. Get a free model first.' }); return; }
   const R = await import('./research.js');
   const isTeam = intent.local === 'team';
-  const msg = push({ role: 'assistant', content: '', pending: true, model: settings.ai.model, loading: isTeam ? 'Assembling the team' : 'Starting the research', steps: [] });
+  const msg = push({ role: 'assistant', content: '', pending: true, model: settings.ai.model, loading: isTeam ? 'Assembling the team' : intent.factCheck ? 'Checking the claim' : 'Starting the research', steps: [] });
   setBusy(true);
   bus.emit('state', 'thinking');
   run.cancel = () => { run.stopped = true; R.complete.cancel?.(); };
@@ -649,7 +737,7 @@ async function runDeep(intent, text, viaVoice, speakOn) {
       msg.content = r.answer;
       msg.agentNotes = R.ROLES.filter((x) => r.notes[x.id]).map((x) => ({ name: x.name, icon: x.icon, text: r.notes[x.id] }));
     } else {
-      const r = await R.research(intent.topic, { onStep });
+      const r = await R.research(intent.topic, { onStep, factCheck: !!intent.factCheck });
       msg.content = r.report;
     }
   } catch (e) {

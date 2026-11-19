@@ -110,6 +110,12 @@ function build(m) {
       body.append(c);
     }
     if (m.cards?.length) body.append(flashcards(m.cards));
+    if (m.htmlPreview) {
+      // Preview without running scripts (the saved file runs fully in your browser).
+      const f = h('iframe', { class: 'html-preview', title: 'Preview of the page', sandbox: '', loading: 'lazy' });
+      f.srcdoc = m.htmlPreview;
+      body.append(h('div', { class: 'item-sub', text: 'Preview (buttons and scripts work in the saved file):' }), f);
+    }
     if (m.agentNotes?.length) body.append(h('details', { class: 'reasoning agent-notes' }, h('summary', { text: `How the team worked (${m.agentNotes.map((a) => a.name).join(' → ')})` }),
       ...m.agentNotes.map((a) => { const d = h('div', { class: 'agent-note' }, h('b', {}, iconNode(a.icon), ' ', a.name)); const c = h('div'); c.innerHTML = md(a.text); d.append(c); return d; })));
     if (m.buttons?.length) body.append(h('div', { class: 'msg-buttons' }, ...m.buttons.map((b, i) => h('button', { class: 'btn btn-sm' + (i === 0 ? ' btn-primary' : ''), type: 'button', text: b.label, onclick: () => pressButton(b) }))));

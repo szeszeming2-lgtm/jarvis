@@ -38,12 +38,14 @@
         </div>
       </div>
       <button class="btn btn-primary btn-block" id="newChatBtn" type="button" data-icon="plus">New conversation</button>
+      <button class="btn btn-ghost btn-sm private-btn" id="privateChatBtn" type="button" data-icon="lock">Private chat</button>
       <label class="search">
         <span class="search-icon" data-icon="search"></span>
         <input id="searchInput" type="search" placeholder="Search conversations" aria-label="Search conversations" autocomplete="off">
       </label>
       <nav class="session-list" id="sessionList" aria-label="Conversation history"></nav>
       <div class="side-nav">
+        <button class="nav-btn mission-nav" type="button" data-open="command" data-icon="display">Command Center</button>
         <button class="nav-btn mission-nav" type="button" data-open="mission" data-icon="zap">Mission Control</button>
         <button class="nav-btn" type="button" data-open="projects" data-icon="folder">Projects</button>
         <button class="nav-btn" type="button" data-open="planner" data-icon="target">Planner</button>
@@ -73,6 +75,7 @@
           <span class="chev" data-icon="chevron"></span>
         </button>
         <button class="icon-btn" id="searchBtn" type="button" title="Search everything (⌘K)" aria-label="Search everything" data-icon="search"></button>
+        <button class="icon-btn bell-btn" id="bellBtn" type="button" title="Notifications" aria-label="Notifications" data-icon="bell"></button>
         <button class="icon-btn" id="shareBtn" type="button" title="Share JARVIS" aria-label="Share JARVIS" data-icon="share"></button>
         <button class="icon-btn" id="speakToggle" type="button" title="Spoken replies" aria-label="Spoken replies" data-icon="speaker"></button>
         <button class="icon-btn" id="hudToggle" type="button" title="Show or hide status panel" aria-label="Show or hide status panel" data-icon="panel"></button>
