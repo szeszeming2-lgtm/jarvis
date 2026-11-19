@@ -1,6 +1,6 @@
 // Offline support for the web version: the interface is cached so JARVIS opens
 // without internet. Requests to Ollama (another origin) are never touched.
-const VERSION = 'jarvis-07be63fcc1';
+const VERSION = 'jarvis-8cd97d0b61';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/main.js', 'js/util.js', 'js/icons.js', 'js/host.js', 'js/store.js', 'js/ollama.js', 'js/markdown.js', 'js/calc.js',
@@ -12,7 +12,7 @@ const CORE = [
   'js/messaging.js', 'js/briefing.js', 'js/vision.js', 'js/sync.js', 'js/ui/circle.js', 'js/ui/sync.js',
   'js/missions.js', 'js/ui/missions.js',
   'js/links.js', 'js/livesync.js', 'js/ui/links.js',
-  'js/news.js', 'js/lock.js', 'js/notify.js', 'js/creator.js', 'js/pptx.js', 'js/emergency.js', 'js/semantic.js', 'js/languages.js', 'js/ui/command.js', 'js/ui/translate.js', 'js/ui/voicefull.js', 'js/suggest.js', 'js/profiles.js', 'js/auth.js', 'js/voiceid.js', 'js/ui/profiles.js', 'js/ui/security.js', 'js/companion.js', 'js/ui/companion.js', 'js/ui/screenvision.js', 'js/ui/recordings.js',
+  'js/news.js', 'js/lock.js', 'js/notify.js', 'js/creator.js', 'js/pptx.js', 'js/emergency.js', 'js/semantic.js', 'js/languages.js', 'js/ui/command.js', 'js/ui/translate.js', 'js/ui/voicefull.js', 'js/suggest.js', 'js/profiles.js', 'js/auth.js', 'js/voiceid.js', 'js/ui/profiles.js', 'js/ui/security.js', 'js/companion.js', 'js/ui/companion.js', 'js/ui/screenvision.js', 'js/ui/recordings.js', 'js/push.js', 'js/calls.js', 'js/ui/calls.js', 'js/ui/imagine.js',
   'js/automations.js', 'js/documents.js', 'js/features.js', 'js/graph.js', 'js/media.js', 'js/modes.js', 'js/planner.js', 'js/projects.js', 'js/research.js', 'js/search.js', 'js/study.js', 'js/ui/imageedit.js', 'js/ui/planner.js', 'js/ui/projects.js', 'js/ui/search.js',
   'assets/icon-192.png', 'assets/icon-512.png', 'assets/icon-maskable-512.png', 'assets/apple-touch-icon.png', 'assets/favicon-32.png',
 ];
@@ -70,4 +70,19 @@ self.addEventListener('fetch', (e) => {
   }
   if (savedPages.has(e.clientId)) { e.respondWith(saved().then((r) => r || fromNet())); return; }
   e.respondWith(fromNet().catch(async () => (await saved()) || Response.error()));
+});
+
+// Push notifications sent by the JARVIS Mac app (encrypted for this device; see js/push.js).
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { title: 'JARVIS', body: e.data?.text?.() || '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'JARVIS', { body: d.body || '', tag: d.tag || undefined, icon: 'assets/icon-192.png', badge: 'assets/favicon-32.png', data: { url: d.url || './' } }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL(e.notification.data?.url || './', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) if (c.url.startsWith(self.registration.scope)) return c.focus();
+    return self.clients.openWindow(url);
+  }));
 });

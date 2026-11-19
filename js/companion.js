@@ -145,9 +145,60 @@ const approvals = new Map();
 export async function notifyPhones(title, body = '', kind = 'info') {
   const f = settings.companion?.forward || {};
   if (kind !== 'test' && f[kind] === false) return 0;
-  if (!ls.connected()) return 0;
   const m = await me();
-  return ls.sendMessage({ kind: 'notify', from: m.id, name: m.name, title: String(title).slice(0, 160), body: String(body).slice(0, 400), type: kind });
+  // Real push (arrives even when JARVIS is closed on the phone): only the Mac app can send it.
+  let pushed = 0;
+  try { const P = await import('./push.js'); if (P.canSend() && (await P.subscriptions()).length) pushed = (await P.sendAll({ title: String(title).slice(0, 160), body: String(body).slice(0, 400), tag: `jarvis-${kind}`, urgent: kind === 'reminder' })).sent; } catch {}
+  if (!ls.connected()) return pushed;
+  const live = await ls.sendMessage({ kind: 'notify', from: m.id, name: m.name, title: String(title).slice(0, 160), body: String(body).slice(0, 400), type: kind });
+  return Math.max(live, pushed);
+}
+
+// ---------------------------------------------------------------- pictures made on the Mac for the phone
+/** Phone: ask your Mac to make a picture. → data URL. */
+export async function requestImage(prompt, { width = 768, height = 768, timeoutMs = 240000 } = {}) {
+  const m = await me();
+  const mac = [...state.devices.values()].find((d) => d.kind === 'computer');
+  if (!ls.connected() || !mac) throw new Error('Your Mac isn’t connected. Open the JARVIS Mac app (signed in with the same phrase).');
+  const id = uid('im');
+  const p = new Promise((resolve, reject) => {
+    imageWait.set(id, { resolve, reject });
+    setTimeout(() => { if (imageWait.has(id)) { imageWait.delete(id); reject(new Error('Your Mac took too long. Pictures take a minute or two; try again.')); } }, timeoutMs);
+  });
+  await ls.sendMessage({ kind: 'img.req', id, to: mac.id, from: m.id, name: m.name, prompt: String(prompt).slice(0, 600), width, height });
+  return p;
+}
+const imageWait = new Map();
+async function makeImageForPhone(msg) {
+  const reply = (o) => ls.sendMessage({ kind: 'img.res', id: msg.id, to: msg.from, from: state.me.id, ...o }).catch(() => {});
+  if (!(await isApproved(msg.from))) { reply({ ok: false, error: 'Allow this phone on your Mac first: send it one command from the iPhone & Mac page, then tap Allow on the Mac.' }); return; }
+  const tools = await import('./tools.js');
+  const r = await tools.execute('generate_image', { prompt: msg.prompt }, { source: 'instant' });
+  if (!r.ok) { reply({ ok: false, error: r.error || 'The Mac couldn’t make that picture.' }); return; }
+  auth.log('picture made for phone', { detail: msg.name || 'phone' }).catch(() => {});
+  reply({ ok: true, image: r.picture });
+}
+
+// ---------------------------------------------------------------- push set-up (phone ↔ Mac)
+const replies = new Map();
+const waitReply = (kind, ms = 15000) => new Promise((resolve, reject) => { const t = setTimeout(() => { replies.delete(kind); reject(new Error('Your Mac didn’t answer. Open the JARVIS Mac app (signed in with the same phrase) and try again.')); }, ms); replies.set(kind, (d) => { clearTimeout(t); replies.delete(kind); resolve(d); }); });
+/** Phone: turn on real push notifications from the Mac. */
+export async function enablePush() {
+  const P = await import('./push.js');
+  const sup = P.receiveSupport(); if (!sup.ok) throw new Error(sup.why);
+  const m = await me();
+  const mac = [...state.devices.values()].find((d) => d.kind === 'computer');
+  if (!ls.connected() || !mac) throw new Error('Your Mac isn’t connected. Open the JARVIS Mac app (signed in with the same phrase) and try again.');
+  const keyP = waitReply('push.key');
+  await ls.sendMessage({ kind: 'push.key.get', from: m.id, to: mac.id });
+  const k = await keyP;
+  if (!k.canSend) throw new Error('Push notifications are sent by the JARVIS Mac app. Your computer is running JARVIS in a browser, which can’t send them.');
+  const sub = await P.subscribe(k.key);
+  const okP = waitReply('push.ok');
+  await ls.sendMessage({ kind: 'push.subscribe', from: m.id, to: mac.id, name: m.name, sub });
+  const r = await okP;
+  if (!r.ok) throw new Error(r.error || 'Your Mac couldn’t save it.');
+  return true;
 }
 async function showOnPhone(n) {
   bus.emit('toast', { text: `${n.name || 'Computer'}: ${n.title}${n.body ? ' ' + n.body : ''}`, icon: 'bell', ms: 8000 });
@@ -190,6 +241,12 @@ export async function start() {
       case 'confirm': state.pending.set(msg.id, msg); emit(); bus.emit('companion.confirm', msg); break;
       case 'confirm.answer': { const r = approvals.get(msg.id); if (r) { approvals.delete(msg.id); r({ answer: msg.answer, pin: msg.pin }); } break; }
       case 'notify': if (m.kind === 'phone' || settings.companion?.showAll) showOnPhone(msg); break;
+      case 'push.key.get': { const P = await import('./push.js'); ls.sendMessage({ kind: 'push.key', to: msg.from, from: m.id, canSend: P.canSend(), key: P.canSend() ? (await import('./push.js')).b64u((await P.vapid()).publicRaw) : '' }).catch(() => {}); break; }
+      case 'push.subscribe': { const P = await import('./push.js'); try { await P.addSubscription(msg.sub, msg.name); auth.log('push notifications on', { detail: msg.name }).catch(() => {}); ls.sendMessage({ kind: 'push.ok', to: msg.from, from: m.id, ok: true }); emit(); } catch (e) { ls.sendMessage({ kind: 'push.ok', to: msg.from, from: m.id, ok: false, error: e.message }); } break; }
+      case 'push.key': case 'push.ok': replies.get(msg.kind)?.(msg); break;
+      case 'img.req': if (m.kind === 'computer') makeImageForPhone(msg); break;
+      case 'img.res': { const w = imageWait.get(msg.id); if (w) { imageWait.delete(msg.id); msg.ok ? w.resolve(msg.image) : w.reject(new Error(msg.error || 'No picture.')); } break; }
+      case 'call.invite': if (/#join=jarvis-call-[0-9a-f]{20}$/.test(msg.link || '')) (await import('./ui/calls.js')).incoming({ name: msg.name || 'device', link: msg.link, video: !!msg.video }); break;
       default: break;
     }
   });

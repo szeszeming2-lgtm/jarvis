@@ -26,6 +26,8 @@ import './ui/translate.js';
 import { initProfileButton } from './ui/profiles.js';
 import './ui/companion.js';
 import './ui/recordings.js';
+import './ui/calls.js';
+import './ui/imagine.js';
 import * as projects from './projects.js';
 import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
@@ -211,6 +213,14 @@ async function boot() {
   bus.on('phoneai.fallback', () => toast('The graphics chip is busy right now, so the backup AI (on the processor) answered this time.', { icon: 'cpu', ms: 6000 }));
   // Siri & Shortcuts links: #ask=<words> runs here; #mac=<words> is sent to the linked computer.
   const runLink = async () => {
+    // A JARVIS Call link: ask first (the browser needs a tap before using the microphone).
+    const j = location.hash.match(/^#join=(jarvis-call-[0-9a-f]{20})$/);
+    if (j) {
+      history.replaceState(null, '', location.pathname + location.search);
+      const how = await dialog({ title: 'Join the call?', text: 'Someone sent you a JARVIS Call link. Your microphone (and camera for video) will be used. The call is encrypted and goes directly between the two devices.', okLabel: 'Join with video', cancelLabel: 'Not now' });
+      if (how) (await import('./ui/calls.js')).openCall({ mode: 'join', link: j[1], video: true });
+      return;
+    }
     const m = location.hash.match(/^#(ask|mac)=(.+)$/);
     if (!m) return;
     const words = decodeURIComponent(m[2].replace(/\+/g, ' ')).trim().slice(0, 1000);
@@ -474,6 +484,14 @@ function wireComposer() {
   document.addEventListener('drop', async (e) => {
     if (!isFileDrag(e)) return;
     e.preventDefault(); dragDepth = 0; hint?.remove();
+    // Screenshot Vision: one screenshot dropped → straight to circling and asking.
+    const files = [...e.dataTransfer.files];
+    if (files.length === 1 && files[0].type.startsWith('image/') && /screen ?shot|screenshot|bildschirmfoto|capture d.?écran|captura|schermata|スクリーンショット|屏幕|截屏|스크린샷/i.test(files[0].name)) {
+      const { openAsk } = await import('./ui/circle.js');
+      const r = await openAsk({ question: input.value.trim(), source: files[0] });
+      if (r?.images) { input.value = ''; assistant.send(r.question, { images: r.images, context: r.context }); }
+      return;
+    }
     for (const f of e.dataTransfer.files) {
       if (f.type.startsWith('image/')) addPendingImage(f);
       else if (f.size < 25e6) {
@@ -534,6 +552,7 @@ async function addPendingImage(file) {
     pending.push(await look.prepareImage(file));
     drawPending();
     $('#input').focus();
+    if (!app.circleTipShown) { app.circleTipShown = true; toast('Tip: tap the picture to circle part of it and ask about just that.', { icon: 'lasso', ms: 5000 }); }
   } catch (e) { toast(e.message, { bad: true }); }
 }
 

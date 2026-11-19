@@ -82,7 +82,7 @@ function disconnect() {
   peer = null;
 }
 
-async function library() {
+export async function library() {
   if (!lib) { await import(/* @vite-ignore */ LIB); lib = window.peerjs?.Peer || window.Peer; }
   if (!lib) throw new Error('The connection helper didn’t load. Are you online?');
   return lib;

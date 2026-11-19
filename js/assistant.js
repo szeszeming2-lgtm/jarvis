@@ -73,7 +73,7 @@ export async function send(text, { viaVoice = false, attachment = null, images =
   const intent = !attachment && !images?.length && settings.instantCommands ? intents.match(text, { customSkills: skills.all().filter((k) => k.enabled !== false) }) : null;
   if (intent?.local === 'stop') { stop(); return; }
   if (intent?.local === 'newchat') { sessions.create(); return; }
-  if (intent?.local === 'look') { bus.emit('look.start', { question: text, viaVoice, source: intent.source }); return; }
+  if (intent?.local === 'look') { bus.emit('look.start', { question: intent.noQuestion ? '' : text, viaVoice, source: intent.source }); return; }
   if (intent?.local === 'recommend') {
     const { recommend } = await import('./plugins.js');
     push({ role: 'user', content: text, voice: viaVoice || undefined });
@@ -162,6 +162,15 @@ export async function send(text, { viaVoice = false, attachment = null, images =
     voiceMod.speak(say.slice(0, 4000));
     return;
   }
+  // Pictures on phones and browsers: open the picture maker with the description filled in.
+  if (intent?.tool === 'generate_image' && !can('imageGen')) {
+    setSetting('imagine.lastPrompt', intent.args?.prompt || '');
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    push({ role: 'assistant', content: 'Here’s the picture maker with your description. Pictures are made on your Mac (from a phone: your linked Mac makes it and sends it back).', instant: true });
+    (await import('./ui/sheets.js')).openSheet('imagine');
+    return;
+  }
+  if (intent?.local === 'jcall') { (await import('./ui/calls.js')).openCall({ mode: 'host', video: intent.video !== false, inviteDevices: !!intent.invite }); return; }
   if (intent?.local === 'screenvision') { (await import('./ui/screenvision.js')).start(); return; }
   if (intent?.local === 'profiles') {
     const P = await import('./profiles.js');

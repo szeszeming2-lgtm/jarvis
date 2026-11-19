@@ -17,6 +17,8 @@ const TABS = [
   ['links', 'Saved links', 'globe'],
   ['translate', 'Live translator', 'language'],
   ['recordings', 'Screen recordings', 'display'],
+  ['calls', 'Calls', 'phone'],
+  ['imagine', 'Make a picture', 'image'],
   ['sync', 'Link devices', 'refresh'],
   ['memory', 'Memory', 'brain'],
   ['skills', 'Skills', 'puzzle'],

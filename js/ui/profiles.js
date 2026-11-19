@@ -153,6 +153,8 @@ registerTab('profiles', (body) => {
         h('div', { class: 'item-actions' },
           me ? null : h('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Switch', onclick: () => P.switchTo(p.id) }),
           me ? h('button', { class: 'btn btn-sm', type: 'button', text: 'Edit', onclick: async () => { if (await profileForm({ title: 'Edit profile', p })) { toast('Saved.'); draw(); initProfileButton(); } } }) : null,
+          me && !locked ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: async () => { const S = await import('./security.js'); await S.offerPin(); draw(); } }, iconNode('lock'), 'Add a PIN') : null,
+          me && locked ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'PIN & security', onclick: () => import('./sheets.js').then((m) => m.show('privacy')) }) : null,
           me ? null : h('button', { class: 'icon-btn', type: 'button', 'aria-label': `Delete ${p.name}`, title: 'Delete', onclick: () => deleteProfile(p, locked).then((d) => d && draw()) }, iconNode('trash')))));
     }
     list.replaceChildren(...items);
