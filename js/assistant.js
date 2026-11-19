@@ -451,8 +451,10 @@ async function converse(s, speakOn) {
       msg.pending = false;
       msg.streaming = false;
       if (run.stopped) { msg.content ||= ''; msg.stopped = true; update(msg); break; }
-      msg.error = friendlyError(e.message);
-      msg.errorKind = /not found|pull/i.test(e.message) ? 'nomodel' : /connect|fetch|network|refused|reach/i.test(e.message) ? 'offline' : 'other';
+      // The phone took the graphics chip away: restart JARVIS once (that gives it back) and ask again by itself.
+      if (e.noGpu && !isNative && await restartForGpu(s, viaVoiceOf(s))) return;
+      msg.error = e.noGpu ? 'Your phone isn’t letting the browser use its graphics chip right now (this happens after JARVIS was in the background). Tap Restart JARVIS. If it keeps happening, close the tab and open JARVIS again, or pick a smaller model: it needs less memory.' : friendlyError(e.message);
+      msg.errorKind = e.noGpu ? 'gpu' : /not found|pull/i.test(e.message) ? 'nomodel' : /connect|fetch|network|refused|reach/i.test(e.message) ? 'offline' : 'other';
       update(msg);
       if (speakOn) voiceMod.endStream();
       break;
@@ -631,6 +633,33 @@ async function runSkillTool(args) {
     results.push({ step: step.tool, ok: res.ok, note: tools.summary(step.tool, res, step.args) });
   }
   return { ok: results.every((r) => r.ok), skill: sk.name, results };
+}
+
+const viaVoiceOf = (s) => !![...s.messages].reverse().find((m) => m.role === 'user')?.voice;
+/** Reload the page once (at most every 2 minutes) and send the same question again afterwards. */
+async function restartForGpu(s, viaVoice) {
+  let last = 0;
+  try { last = Number(sessionStorage.getItem('jarvis-gpu-restart')) || 0; } catch { return false; }
+  if (Date.now() - last < 120000) return false;   // already tried: show the message instead of looping
+  const u = s.messages.map((m) => m.role).lastIndexOf('user');
+  if (u < 0) return false;
+  const text = s.messages[u].content;
+  try {
+    sessionStorage.setItem('jarvis-gpu-restart', String(Date.now()));
+    sessionStorage.setItem('jarvis-gpu-resend', JSON.stringify({ sid: s.id, text, viaVoice, at: Date.now() }));
+  } catch { return false; }
+  s.messages.splice(u);                 // the question is asked again after the restart
+  bus.emit('session', s);
+  await sessions.saveNow(s).catch(() => {});
+  bus.emit('toast', { text: 'Restarting the AI…' });
+  setTimeout(() => location.reload(), 300);
+  return true;
+}
+/** After a restart for the graphics chip: ask the question again. */
+export function resendAfterRestart() {
+  let r = null;
+  try { r = JSON.parse(sessionStorage.getItem('jarvis-gpu-resend') || 'null'); sessionStorage.removeItem('jarvis-gpu-resend'); } catch {}
+  return r && r.text && Date.now() - (r.at || 0) < 120000 ? r : null;
 }
 
 function friendlyError(m) {

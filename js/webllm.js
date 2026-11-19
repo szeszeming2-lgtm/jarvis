@@ -140,6 +140,28 @@ function wasmGenerate(messages, { temperature = 0.7, maxTokens = 500, onDelta } 
 // background or short on memory. WebLLM then quietly drops the model, and the next question
 // fails with "Model not loaded…". We notice that, load the model again and carry on.
 const DROPPED = /not loaded|reload\(model\)|ModelNotLoaded|device (?:was |is |has been )?lost|GPUDevice|Instance reference|disposed|destroyed/i;
+// Sometimes the browser has no graphics chip to give for a moment (an iPhone takes it back while
+// Safari is in the background, and needs a little time before handing it out again).
+export const NO_GPU = /NO_GPU|compatible GPU|requestAdapter|WebGPU is not|adapter is null|no adapter|use its graphics chip/i;
+async function gpuReady() {
+  if (state.gpuProbe) return state.gpuProbe();   // tests only
+  try { return !!(navigator.gpu && ((await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })) || (await navigator.gpu.requestAdapter()))); } catch { return false; }
+}
+/** Ask for the graphics chip a few times over ~6 seconds before giving up. */
+async function waitForGpu(report) {
+  for (const ms of [0, 500, 1000, 2000, 3000]) {
+    if (ms) { report?.({ text: 'Waiting for the graphics chip…' }); await new Promise((r) => setTimeout(r, state.gpuWaitScale != null ? ms * state.gpuWaitScale : ms)); }
+    if (await gpuReady()) return true;
+  }
+  return false;
+}
+/** A processor (backup) model already saved on this device, to answer while the graphics chip is away. */
+async function savedBackup() {
+  if (state.backupProbe) return state.backupProbe();   // tests only
+  for (const m of [...WASM_MODELS].sort((a, b) => (b.pick ? 1 : 0) - (a.pick ? 1 : 0))) if (await isDownloaded(m.key).catch(() => false)) return m.key;
+  return '';
+}
+
 /** Did the engine drop its model (the page still thinks it is loaded)? */
 const dropped = () => { const m = state.engine?.loadedModelIdToPipeline; return m instanceof Map && !m.has(state.loadedId); };
 /** Forget the loaded model so the next load() starts fresh (a new engine gets a new graphics device). */
@@ -184,6 +206,7 @@ export async function load(key, onProgress) {
       return state.wasm;
     }
     const w = await lib();
+    if (!(await waitForGpu(report))) throw new Error('NO_GPU');
     if (state.engine) { state.engine.setInitProgressCallback?.(report); await state.engine.reload(id); }
     else state.engine = await w.CreateMLCEngine(id, { initProgressCallback: report });
     state.loadedId = id;
@@ -209,6 +232,7 @@ function explain(e) {
   const m = String(e?.message || e);
   if (/QuotaExceeded|quota|storage/i.test(m)) return 'There isn’t enough free storage on this device for that model. Free some space or pick a smaller one.';
   if (/device lost|out of memory|OOM|allocate|buffer size/i.test(m)) return 'This model is too big for this device’s memory. Pick a smaller one (Tiny or Small).';
+  if (NO_GPU.test(m)) return 'Your phone isn’t letting the browser use its graphics chip right now (this happens after JARVIS was in the background). Restarting JARVIS fixes it.';
   if (/OFFLINE_LIB/.test(m)) return 'You’re offline, and the AI engine isn’t saved on this device yet. Connect to the internet once and open JARVIS; after that it works offline.';
   if (/Failed to fetch|NetworkError|Load failed|network connection was lost|offline/i.test(m) && typeof navigator !== 'undefined' && navigator.onLine === false) return 'You’re offline and this model isn’t fully saved on this device. Connect once to finish the download; then it works offline.';
   if (/network|fetch|Failed to fetch|NetworkError/i.test(m)) return 'The download was interrupted. Check your internet connection and try again — it continues where it stopped.';
@@ -233,17 +257,18 @@ const toChat = (messages) => {
 /** Stream a chat reply. Returns {promise → {usage}, cancel}. */
 export function chat({ key, messages, temperature = 0.7, maxTokens = 700, onDelta, onLoad }) {
   let cancelled = false, stop = null;
+  const runWasm = async (k) => {
+    await load(k, onLoad);
+    if (cancelled) return {};
+    const g = wasmGenerate(toChat(messages), { temperature, maxTokens: Math.min(maxTokens, 280), onDelta }); // ~6 words/s on a processor: keep answers short
+    stop = g.cancel;
+    const r = await g.promise;
+    return { usage: { completion_tokens: r.tokens } };
+  };
   const promise = (async () => {
-    if (isWasmKey(key)) {
-      await load(key, onLoad);
-      if (cancelled) return {};
-      const g = wasmGenerate(toChat(messages), { temperature, maxTokens: Math.min(maxTokens, 280), onDelta }); // ~6 words/s on a processor: keep answers short
-      stop = g.cancel;
-      const r = await g.promise;
-      return { usage: { completion_tokens: r.tokens } };
-    }
+    if (isWasmKey(key)) return runWasm(key);
     const extra = info(key)?.thinking ? { extra_body: { enable_thinking: false } } : {};
-    return withEngine(key, onLoad, async (engine) => {
+    try { return await withEngine(key, onLoad, async (engine) => {
       if (cancelled) return {};
       let usage = null, wrote = false;
       try {
@@ -260,8 +285,15 @@ export function chat({ key, messages, temperature = 0.7, maxTokens = 700, onDelt
         throw e;
       }
       return { usage };
-    });
-  })().catch((e) => { throw e?.partial ? e : new Error(explain(e)); });
+    }); } catch (e) {
+      // No graphics chip right now: answer with the backup AI if one is saved here.
+      if (e?.partial || !NO_GPU.test(String(e?.message || e))) throw e;
+      const backup = await savedBackup();
+      if (!backup || cancelled) throw e;
+      bus.emit('phoneai.fallback', { key: backup });
+      return runWasm(backup);
+    }
+  })().catch((e) => { throw e?.partial ? e : Object.assign(new Error(explain(e)), { noGpu: NO_GPU.test(String(e?.message || e)) }); });
   return { promise, cancel: () => { cancelled = true; try { stop?.(); state.engine?.interruptGenerate(); } catch {} } };
 }
 
@@ -276,10 +308,17 @@ export async function extract({ key, system, user, schema }) {
     try { return JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)); } catch { return {}; }
   }
   const extra = info(key)?.thinking ? { extra_body: { enable_thinking: false } } : {};
-  const r = await withEngine(key, undefined, (engine) => engine.chat.completions.create({
+  let r;
+  try {
+    r = await withEngine(key, undefined, (engine) => engine.chat.completions.create({
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
     temperature: 0, max_tokens: 220, response_format: { type: 'json_object', schema: JSON.stringify(schema) }, ...extra,
-  }));
+    }));
+  } catch (e) {
+    const backup = NO_GPU.test(String(e?.message || e)) ? await savedBackup() : '';
+    if (backup) return extract({ key: backup, system, user, schema });
+    throw Object.assign(new Error(explain(e)), { noGpu: NO_GPU.test(String(e?.message || e)) });
+  }
   const text = r.choices?.[0]?.message?.content || '{}';
   return JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1) || '{}');
 }

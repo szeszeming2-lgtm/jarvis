@@ -208,6 +208,19 @@ function errorCard(m) {
   } else if (m.errorKind === 'pictureai') {
     actions.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: `Download and answer (${m.sizeMB || 210} MB)`, onclick: (e) => { e.currentTarget.closest('.notice-card')?.remove(); const s = sessions.state.current; const i = s.messages.indexOf(m); if (i >= 0) s.messages.splice(i, 1); assistant.answerPicture(m.forMsg); } }));
     if (!ollama.isPhone()) { const pick = ollama.bestVisionPick(window.__deviceRam || 8); actions.append(h('button', { class: 'btn btn-sm', type: 'button', text: `Or a bigger one: ${pick.label} (${pick.size} GB)`, onclick: () => openSheet('models') })); }
+  } else if (m.errorKind === 'gpu') {
+    // Reloading gives the graphics chip back; the question is asked again afterwards.
+    actions.append(
+      h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Restart JARVIS', onclick: () => {
+        const s = sessions.state.current;
+        let u = s.messages.indexOf(m) - 1;
+        while (u >= 0 && s.messages[u].role !== 'user') u--;
+        if (u < 0) { location.reload(); return; }
+        try { sessionStorage.setItem('jarvis-gpu-resend', JSON.stringify({ sid: s.id, text: s.messages[u].content, at: Date.now() })); } catch {}
+        s.messages.splice(u);
+        sessions.saveNow(s).catch(() => {}).finally(() => location.reload());
+      } }),
+      h('button', { class: 'btn btn-sm', type: 'button', text: 'Use a smaller model', onclick: () => openSheet('models') }));
   } else if (m.errorKind === 'nomodel') {
     actions.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Get a free model', onclick: () => openSheet('models') }));
   }

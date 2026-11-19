@@ -162,7 +162,17 @@ async function boot() {
   $('#brandName').textContent = settings.assistantName.toUpperCase();
   document.title = settings.assistantName;
 
-  ollama.detect().then(() => { updateModelChip(); if (ollama.engine.status === 'online') ollama.warm(); });
+  bus.on('phoneai.fallback', () => toast('The graphics chip is busy right now, so the backup AI (on the processor) answered this time.', { icon: 'cpu', ms: 6000 }));
+  // Restarted because the phone took the graphics chip away? Ask the same question again.
+  const askAgain = assistant.resendAfterRestart();
+  ollama.detect().then(async () => {
+    updateModelChip();
+    if (askAgain) {
+      if (askAgain.sid && sessions.state.current?.id !== askAgain.sid) await sessions.open(askAgain.sid).catch(() => {});
+      toast('JARVIS restarted. Asking again…', { icon: 'refresh' });
+      assistant.send(askAgain.text, { viaVoice: !!askAgain.viaVoice });
+    } else if (ollama.engine.status === 'online') ollama.warm();
+  });
   bus.on('engine', updateModelChip);
   bus.on('settings', (d) => { if (d.path.startsWith('ai.')) updateModelChip(); if (d.path === 'voice.speak') updateSpeakToggle(); });
   setInterval(() => { if (ollama.engine.status !== 'online' && !document.hidden) ollama.detect(); }, 15000);
