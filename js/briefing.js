@@ -83,7 +83,7 @@ export async function textIt(text) {
 /** Run every minute: deliver once a day. deliver(briefing) shows/speaks it. */
 export function startSchedule(deliver) {
   const tick = async () => {
-    if (!isDue()) return;
+    if (!settings.setupDone || !isDue()) return;   // not while the first-time setup is still on screen
     set('briefing.last', todayKey());
     try { const b = await build(); await deliver(b); textIt(b.text); } catch (e) { console.error(e); }
   };
@@ -139,7 +139,7 @@ export function isEveningDue(now = new Date(), b = settings.briefing || {}) {
 
 export function startEvening(deliver) {
   const tick = async () => {
-    if (!isEveningDue()) return;
+    if (!settings.setupDone || !isEveningDue()) return;
     set('briefing.lastEvening', todayKey());
     try { const b = await buildEvening(); await deliver(b); textIt(b.text); } catch (e) { console.error(e); }
   };

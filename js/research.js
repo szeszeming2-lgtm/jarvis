@@ -106,6 +106,8 @@ export async function research(topic, { onStep = () => {}, onDelta, maxSources =
   for (const q of queries) {
     let found = [];
     try { found = web ? await webSources(q, 4) : await wikiSources(q, 3); } catch {}
+    // The web search site can be down or blocked: Wikipedia still answers.
+    if (web && !found.length) { try { found = await wikiSources(q, 3); } catch {} }
     for (const f of found) { const k = f.url.replace(/[#?].*$/, ''); if (!seen.has(k) && relevant(f)) { seen.add(k); sources.push(f); } }
     if (sources.length >= maxSources * 2) break;
   }
