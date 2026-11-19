@@ -106,10 +106,35 @@ function wasmGenerate(messages, { temperature = 0.7, maxTokens = 500, onDelta } 
   return { promise, cancel: () => stopper.interrupt() };
 }
 
+// iPhones (and some Androids) take the graphics chip away from Safari while it is in the
+// background or short on memory. WebLLM then quietly drops the model, and the next question
+// fails with "Model not loaded…". We notice that, load the model again and carry on.
+const DROPPED = /not loaded|reload\(model\)|ModelNotLoaded|device (?:was |is |has been )?lost|GPUDevice|Instance reference|disposed|destroyed/i;
+/** Did the engine drop its model (the page still thinks it is loaded)? */
+const dropped = () => { const m = state.engine?.loadedModelIdToPipeline; return m instanceof Map && !m.has(state.loadedId); };
+/** Forget the loaded model so the next load() starts fresh (a new engine gets a new graphics device). */
+export async function reset() {
+  const e = state.engine;
+  state.engine = null; state.loadedId = '';
+  try { await e?.unload(); } catch {}
+}
+/** Run fn(engine); if the phone dropped the model, load it again and try once more. */
+async function withEngine(key, onLoad, fn) {
+  let engine = await load(key, onLoad);
+  try { return await fn(engine, false); }
+  catch (e) {
+    if (!DROPPED.test(String(e?.message || e)) || e?.partial) throw e;
+    await reset();
+    engine = await load(key, onLoad);
+    return fn(engine, true);
+  }
+}
+
 /** Download (if needed) and load a model onto the GPU. onProgress({progress 0..1, text}). */
 export async function load(key, onProgress) {
   const id = fullId(key);
   if (isWasmKey(key) && state.wasm?.key === key) return state.wasm;
+  if (state.engine && state.loadedId === id && dropped()) await reset();
   if (state.engine && state.loadedId === id) return state.engine;
   if (state.loading) { await state.loading.catch(() => {}); if (state.loadedId === id) return state.engine; }
   const s = await support();
@@ -152,6 +177,7 @@ function explain(e) {
   if (/QuotaExceeded|quota|storage/i.test(m)) return 'There isn’t enough free storage on this device for that model. Free some space or pick a smaller one.';
   if (/device lost|out of memory|OOM|allocate|buffer size/i.test(m)) return 'This model is too big for this device’s memory. Pick a smaller one (Tiny or Small).';
   if (/network|fetch|Failed to fetch|NetworkError/i.test(m)) return 'The download was interrupted. Check your internet connection and try again — it continues where it stopped.';
+  if (DROPPED.test(m)) return 'The phone took the AI out of memory (this happens when the browser was in the background). Tap Try again and it loads again.';
   return m;
 }
 
@@ -173,25 +199,34 @@ const toChat = (messages) => {
 export function chat({ key, messages, temperature = 0.7, maxTokens = 700, onDelta, onLoad }) {
   let cancelled = false, stop = null;
   const promise = (async () => {
-    const engine = await load(key, onLoad);
-    if (cancelled) return {};
     if (isWasmKey(key)) {
+      await load(key, onLoad);
+      if (cancelled) return {};
       const g = wasmGenerate(toChat(messages), { temperature, maxTokens: Math.min(maxTokens, 280), onDelta }); // ~6 words/s on a processor: keep answers short
       stop = g.cancel;
       const r = await g.promise;
       return { usage: { completion_tokens: r.tokens } };
     }
     const extra = info(key)?.thinking ? { extra_body: { enable_thinking: false } } : {};
-    const stream = await engine.chat.completions.create({ messages: toChat(messages), stream: true, temperature, max_tokens: maxTokens, stream_options: { include_usage: true }, ...extra });
-    let usage = null;
-    for await (const chunk of stream) {
-      if (cancelled) break;
-      const d = chunk.choices?.[0]?.delta?.content;
-      if (d) onDelta?.(d.replace(/<\/?think>/g, ''));
-      if (chunk.usage) usage = chunk.usage;
-    }
-    return { usage };
-  })();
+    return withEngine(key, onLoad, async (engine) => {
+      if (cancelled) return {};
+      let usage = null, wrote = false;
+      try {
+        const stream = await engine.chat.completions.create({ messages: toChat(messages), stream: true, temperature, max_tokens: maxTokens, stream_options: { include_usage: true }, ...extra });
+        for await (const chunk of stream) {
+          if (cancelled) break;
+          const d = chunk.choices?.[0]?.delta?.content;
+          if (d) { wrote = true; onDelta?.(d.replace(/<\/?think>/g, '')); }
+          if (chunk.usage) usage = chunk.usage;
+        }
+      } catch (e) {
+        // Part of the answer is already on screen: don't start over and repeat it.
+        if (wrote) { if (DROPPED.test(String(e?.message || e))) state.loadedId = ''; throw Object.assign(new Error(explain(e)), { partial: true }); }
+        throw e;
+      }
+      return { usage };
+    });
+  })().catch((e) => { throw e?.partial ? e : new Error(explain(e)); });
   return { promise, cancel: () => { cancelled = true; try { stop?.(); state.engine?.interruptGenerate(); } catch {} } };
 }
 
@@ -205,12 +240,11 @@ export async function extract({ key, system, user, schema }) {
     const text = (await g.promise).text;
     try { return JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)); } catch { return {}; }
   }
-  const engine = await load(key);
   const extra = info(key)?.thinking ? { extra_body: { enable_thinking: false } } : {};
-  const r = await engine.chat.completions.create({
+  const r = await withEngine(key, undefined, (engine) => engine.chat.completions.create({
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
     temperature: 0, max_tokens: 220, response_format: { type: 'json_object', schema: JSON.stringify(schema) }, ...extra,
-  });
+  }));
   const text = r.choices?.[0]?.message?.content || '{}';
   return JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1) || '{}');
 }

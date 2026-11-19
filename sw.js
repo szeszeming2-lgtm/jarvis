@@ -1,6 +1,6 @@
 // Offline support for the web version: the interface is cached so JARVIS opens
 // without internet. Requests to Ollama (another origin) are never touched.
-const VERSION = 'jarvis-7661ed72c8';
+const VERSION = 'jarvis-15f2447fe4';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/main.js', 'js/util.js', 'js/icons.js', 'js/host.js', 'js/store.js', 'js/ollama.js', 'js/markdown.js', 'js/calc.js',
