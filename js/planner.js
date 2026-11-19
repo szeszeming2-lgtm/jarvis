@@ -1,6 +1,6 @@
 // Planner: habits (with streaks), goals (with progress), a simple budget, and a
 // stopwatch. Everything is saved only on this device.
-import { read, write } from './store.js';
+import { read, write, tombstone } from './store.js';
 import { bus, uid } from './util.js';
 
 let data = { habits: [], goals: [], money: [], budget: { monthly: 0 }, stopwatch: { start: 0, elapsed: 0, laps: [] } };
@@ -28,7 +28,7 @@ export function checkHabit(name, on = true, day = dayKey()) {
   save();
   return { ...h, streak: streak(h) };
 }
-export function removeHabit(id) { data.habits = data.habits.filter((h) => h.id !== id); save(); }
+export function removeHabit(id) { const hb = data.habits.find((h) => h.id === id); if (hb) tombstone('habit:' + hb.name.trim()); data.habits = data.habits.filter((h) => h.id !== id); save(); }
 /** Days in a row up to today (or yesterday if today isn't ticked yet). */
 export function streak(h, today = new Date()) {
   const d = new Date(today);
@@ -57,12 +57,13 @@ export function updateGoal(q, amount, { set = false } = {}) {
   g.progress = Math.max(0, set ? Number(amount) : g.progress + Number(amount));
   if (!g.target) g.progress = Math.min(100, g.progress);
   g.log.push({ at: Date.now(), change: g.progress - before });
+  g.updated = Date.now();
   if (goalPct(g) >= 100 && !g.doneAt) g.doneAt = Date.now();
   save();
   return { ...g, pct: goalPct(g) };
 }
 export const goalPct = (g) => Math.round(Math.min(100, g.target ? (g.progress / g.target) * 100 : g.progress));
-export function removeGoal(id) { data.goals = data.goals.filter((g) => g.id !== id); save(); }
+export function removeGoal(id) { tombstone('goal:' + id); data.goals = data.goals.filter((g) => g.id !== id); save(); }
 
 // ---------------------------------------------------------------- budget
 const CATS = [
@@ -82,7 +83,7 @@ export function logMoney({ amount, note = '', kind = 'expense', category = '', d
   data.money.push(e); save();
   return { ...e, month: monthSummary() };
 }
-export function removeMoney(id) { data.money = data.money.filter((m) => m.id !== id); save(); }
+export function removeMoney(id) { tombstone('money:' + id); data.money = data.money.filter((m) => m.id !== id); save(); }
 export function setMonthlyBudget(n) { data.budget.monthly = Math.max(0, Number(n) || 0); save(); }
 
 /** This month's totals: {spent, income, left, byCategory:[[cat, total]], budget, over} */

@@ -1,6 +1,6 @@
 // People you text and call, saved on this device ("Mom → +1 555 0100").
 // The web version can't read your phone's contacts, so this list fills that gap.
-import { read, write } from './store.js';
+import { read, write, tombstone } from './store.js';
 import { bus, uid } from './util.js';
 
 let people = [];
@@ -31,10 +31,11 @@ export function upsert({ name, phone = '', aliases = [], allowEmpty = false, ...
   if (existing) {
     if (phone) existing.phone = phone;
     Object.assign(existing, extra);
+    existing.updated = Date.now();
     existing.aliases = [...new Set([...(existing.aliases || []), ...aliases])];
-  } else people.push({ id: uid('p'), name: name.charAt(0).toUpperCase() + name.slice(1), phone, aliases, ...extra });
+  } else people.push({ id: uid('p'), name: name.charAt(0).toUpperCase() + name.slice(1), phone, aliases, created: Date.now(), ...extra });
   save();
   return find(name);
 }
 
-export function remove(id) { people = people.filter((p) => p.id !== id); save(); }
+export function remove(id) { const p = people.find((x) => x.id === id); if (p) tombstone('person:' + p.name.trim()); people = people.filter((x) => x.id !== id); save(); }

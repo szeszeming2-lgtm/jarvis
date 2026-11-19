@@ -1,5 +1,5 @@
 // Workout log: what you did, when. Stored only on this device.
-import { read, write } from './store.js';
+import { read, write, tombstone } from './store.js';
 import { bus, uid } from './util.js';
 
 let log = [];
@@ -29,7 +29,7 @@ export function add(entry) {
   return e;
 }
 
-export function remove(id) { log = log.filter((e) => e.id !== id); save(); }
+export function remove(id) { tombstone('workout:' + id); log = log.filter((e) => e.id !== id); save(); }
 
 export function describe(e) {
   const parts = [];

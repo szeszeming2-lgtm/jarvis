@@ -18,6 +18,9 @@ import './ui/sync.js';
 import './ui/projects.js';
 import './ui/planner.js';
 import * as planner from './planner.js';
+import * as links from './links.js';
+import './ui/links.js';
+import './ui/missions.js';
 import * as projects from './projects.js';
 import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
@@ -56,7 +59,15 @@ async function boot() {
   if (!isNative && isMobile() && settings.ai.provider !== 'phone') { settings.ai.provider = 'phone'; settings.ai.model = ''; }
   applyAppearance();
   hydrateIcons();
-  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load(), lists.load(), people.load(), workout.load(), projects.load(), planner.load()]);
+  await Promise.all([memory.load(), skills.load(), sessions.load(), reminders.load(), lists.load(), people.load(), workout.load(), projects.load(), planner.load(), links.load()]);
+  // Mission Control: pick up missions where they stopped; tell the user when one needs them.
+  import('./missions.js').then(async (MS) => {
+    await MS.load(); MS.kick();
+    bus.on('missions', (list) => { for (const m of list || []) { if (['awaiting-approval', 'waiting'].includes(m.status) && !m._told) { m._told = true; toast(`Mission “${m.goal.slice(0, 40)}” needs your OK`, { icon: 'zap', ms: 6000 }); } if (m.status !== 'awaiting-approval' && m.status !== 'waiting') m._told = false; } });
+    bus.on('mission.done', (m) => toast(`Mission done: ${m.goal.slice(0, 50)}`, { icon: 'check', ms: 8000 }));
+  }).catch(console.error);
+  // Signed in with a secret phrase? Keep this device in step with the others.
+  import('./livesync.js').then((ls) => ls.start()).catch(console.error);
   sessions.create();
 
   app.viz = new Visualizer($('#visualizer'));
@@ -528,6 +539,7 @@ function wireVoice() {
   });
   bus.on('voice.final', (text) => {
     $('#partial').hidden = true;
+    if (voice.voice.capture) { const f = voice.voice.capture; voice.voice.capture = null; f(text); return; }
     if (assistant.run.confirmResolvers.size) { bus.emit('voice.final.confirm', text); return; }
     assistant.send(text, { viaVoice: true });
   });

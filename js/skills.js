@@ -3,7 +3,7 @@
 // free ones from the store (bundled with the app, so it works offline).
 // A plugin is plain data, never code, so it can only do what JARVIS's own abilities
 // allow, and every action still follows the user's Permissions.
-import { read, write } from './store.js';
+import { read, write, tombstone } from './store.js';
 import { bus, uid } from './util.js';
 import { registerCustom, clearCustom, byName, GROUPS } from './tools.js';
 
@@ -44,18 +44,18 @@ export function find(nameOrCommand) {
 export function upsert(skill) {
   skill.command = slug(skill.command || skill.name);
   const i = custom.findIndex((s) => s.id === skill.id);
-  if (i >= 0) custom[i] = skill; else custom.push({ id: uid('k'), enabled: true, ...skill });
+  if (i >= 0) custom[i] = { ...skill, updated: Date.now() }; else custom.push({ id: uid('k'), enabled: true, created: Date.now(), ...skill });
   save();
 }
 
-export function remove(id) { custom = custom.filter((s) => s.id !== id); save(); }
+export function remove(id) { const s = custom.find((x) => x.id === id); if (s) tombstone('skill:' + s.command); custom = custom.filter((x) => x.id !== id); save(); }
 export function toggle(id, on) { const s = custom.find((x) => x.id === id); if (s) { s.enabled = on; save(); } }
 export function installed(galleryId) { return custom.some((s) => s.galleryId === galleryId); }
-export function install(galleryId) { const g = GALLERY.find((x) => x.id === galleryId); if (g && !installed(galleryId)) { custom.push(fromGallery(g)); save(); } }
+export function install(galleryId) { const g = GALLERY.find((x) => x.id === galleryId); if (g && !installed(galleryId)) { custom.push({ ...fromGallery(g), created: Date.now() }); save(); } }
 export function importSkills(list) {
   for (const s of list) {
     if (!s || !s.name || !KINDS.includes(s.kind) || (s.kind === 'link' && !safeLink(s.url))) continue;
-    custom.push({ ...sanitize(s), id: uid('k'), enabled: true });
+    custom.push({ ...sanitize(s), id: uid('k'), enabled: true, created: Date.now() });
   }
   save();
 }

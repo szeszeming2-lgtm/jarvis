@@ -19,7 +19,7 @@ export async function start({ question = '', viaVoice = false, source = null } =
     const r = await openAsk({ question: q, source });
     if (!r) return;
     if (r.pick) return pickOnScreen(q, viaVoice);
-    await assistant.send(r.question, { images: r.images, context: r.context, viaVoice });
+    await assistant.send(r.question, { images: r.images, context: r.context, viaVoice: viaVoice || !!r.viaVoice });
   } catch (e) {
     if (/Permission denied|NotAllowed|cancel/i.test(e.message || e.name)) return;
     toast(e.message, { bad: true, ms: 6000 });

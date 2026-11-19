@@ -5,6 +5,7 @@ import { h, iconNode } from '../util.js';
 import { call, can, isNative } from '../host.js';
 import { toast } from './common.js';
 import { thumbOf } from './look.js';
+import * as voice from '../voice.js';
 
 const mobile = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const QUICK = ['What is this?', 'Explain this', 'Read the text', 'Translate this', 'How do I use this?', 'Solve this'];
@@ -37,9 +38,20 @@ function build(question, resolve) {
   const canvas = h('canvas', { class: 'ask-canvas', 'aria-label': 'Your picture. Draw a circle around what you want to ask about.' });
   const qInput = h('input', { class: 'field ask-input', type: 'text', value: question, placeholder: 'Ask about what you circled…', enterkeyhint: 'send', 'aria-label': 'Your question' });
   const askBtn = h('button', { class: 'btn btn-primary ask-go', type: 'button', 'aria-label': 'Ask' }, iconNode('send'), h('span', { text: 'Ask' }));
+  // Ask out loud: what you say becomes the question, and the answer is spoken back.
+  const micBtn = h('button', { class: 'mic-btn ask-mic', type: 'button', 'aria-label': 'Ask out loud', title: 'Ask out loud' }, iconNode('mic'));
+  let heardByVoice = false;
+  micBtn.addEventListener('click', async () => {
+    if (voice.voice.listening) { voice.voice.capture = null; voice.stopListening(); micBtn.classList.remove('live'); return; }
+    try {
+      voice.voice.capture = (text) => { micBtn.classList.remove('live'); qInput.value = text; heardByVoice = true; submit(); };
+      await voice.listen('command');
+      micBtn.classList.add('live'); hint.textContent = 'Listening… ask your question.';
+    } catch (e) { voice.voice.capture = null; toast(e.message, { bad: true }); }
+  });
   const chips = h('div', { class: 'ask-chips' }, ...QUICK.map((q) => h('button', { class: 'suggestion', type: 'button', text: q, onclick: () => { qInput.value = q; submit(); } })));
   const tools = h('div', { class: 'ask-tools' });
-  const bottom = h('div', { class: 'ask-bottom' }, tools, chips, h('div', { class: 'ask-row' }, qInput, askBtn));
+  const bottom = h('div', { class: 'ask-bottom' }, tools, chips, h('div', { class: 'ask-row' }, qInput, micBtn, askBtn));
   const layer = h('div', { class: 'ask-layer', role: 'dialog', 'aria-label': 'Circle to ask' },
     h('div', { class: 'ask-top' }, title, h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close', onclick: () => close(null) }, iconNode('x'))),
     hint, stage, bottom);
@@ -220,7 +232,8 @@ function build(question, resolve) {
     const q = qInput.value.trim() || 'What is this?';
     const circled = stroke.length > 8;
     const shot = cropCircled(base, circled ? stroke : null);
-    close({ question: q, images: [shot], circled, context: circled
+    if (voice.voice.capture) { voice.voice.capture = null; if (voice.voice.listening) voice.stopListening(); }
+    close({ question: q, images: [shot], circled, viaVoice: heardByVoice, context: circled
       ? 'The picture shows the part I circled (my circle is drawn in red). Answer about what is inside the red circle. Be specific and brief (1 to 4 sentences) unless I ask for more.'
       : 'Answer about this picture. Be specific and brief (1 to 4 sentences) unless I ask for more.' });
   }

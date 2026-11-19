@@ -1,6 +1,6 @@
 // Offline support for the web version: the interface is cached so JARVIS opens
 // without internet. Requests to Ollama (another origin) are never touched.
-const VERSION = 'jarvis-0e9d3193d2';
+const VERSION = 'jarvis-226d9994b3';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/main.js', 'js/util.js', 'js/icons.js', 'js/host.js', 'js/store.js', 'js/ollama.js', 'js/markdown.js', 'js/calc.js',
@@ -10,6 +10,8 @@ const CORE = [
   'js/webllm.js', 'js/lists.js', 'js/people.js', 'js/weather.js', 'js/ui/phone.js', 'js/ui/lists.js', 'js/ui/share.js',
   'js/reps.js', 'js/workout.js', 'js/converter.js', 'js/plugins.js', 'js/ui/workout.js', 'js/ui/plugins.js', 'js/ui/call.js',
   'js/messaging.js', 'js/briefing.js', 'js/vision.js', 'js/sync.js', 'js/ui/circle.js', 'js/ui/sync.js',
+  'js/missions.js', 'js/ui/missions.js',
+  'js/links.js', 'js/livesync.js', 'js/ui/links.js',
   'js/automations.js', 'js/documents.js', 'js/features.js', 'js/graph.js', 'js/media.js', 'js/modes.js', 'js/planner.js', 'js/projects.js', 'js/research.js', 'js/search.js', 'js/study.js', 'js/ui/imageedit.js', 'js/ui/planner.js', 'js/ui/projects.js', 'js/ui/search.js',
   'assets/icon-192.png', 'assets/icon-512.png', 'assets/icon-maskable-512.png', 'assets/apple-touch-icon.png', 'assets/favicon-32.png',
 ];
@@ -40,7 +42,7 @@ self.addEventListener('fetch', (e) => {
   }
   // Picture AI engine (pinned transformers.js + its WASM runtime): keep a copy for offline use.
   // The model files themselves are kept by transformers.js in its own "transformers-cache".
-  if (req.method === 'GET' && (req.url.startsWith('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/') || req.url.startsWith('https://cdn.jsdelivr.net/npm/onnxruntime-web@') || req.url.startsWith('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/'))) {
+  if (req.method === 'GET' && (req.url.startsWith('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/') || req.url.startsWith('https://cdn.jsdelivr.net/npm/onnxruntime-web@') || req.url.startsWith('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/') || req.url.startsWith('https://cdn.jsdelivr.net/npm/peerjs@1.5.5/'))) {
     e.respondWith(caches.open('jarvis-lib-transformers-4.3.2').then(async (c) => (await c.match(req.url)) || fetch(req).then((res) => { if (res.ok) c.put(req.url, res.clone()); return res; })));
     return;
   }

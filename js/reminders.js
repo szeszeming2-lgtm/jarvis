@@ -2,7 +2,7 @@
 // The desktop app also adds them to the system's Reminders app so your phone
 // reminds you even when JARVIS is closed. The web version can export a calendar
 // file (.ics) for the same reason.
-import { read, write, settings } from './store.js';
+import { read, write, settings, tombstone } from './store.js';
 import { bus, uid } from './util.js';
 import { call, can, isNative } from './host.js';
 import { parseWhen, describeWhen } from './when.js';
@@ -97,6 +97,7 @@ export async function cancel(id) {
   if (!r) return false;
   clearTimeout(timers.get(id));
   items = items.filter((x) => x.id !== id);
+  tombstone('reminder:' + id);
   if (r.systemId && can('reminders')) call('reminders.remove', { id: r.systemId }).catch(() => {});
   save();
   return true;
@@ -107,7 +108,9 @@ export function match(about) {
   return upcoming().filter((r) => !q.length || q.some((w) => r.text.toLowerCase().includes(w)));
 }
 
-export async function clearDone() { items = items.filter((r) => !r.done); save(); }
+export async function clearDone() { tombstone(...items.filter((r) => r.done).map((r) => 'reminder:' + r.id)); items = items.filter((r) => !r.done); save(); }
+/** Reload after a sync without announcing old reminders again. */
+export async function reload() { for (const t of timers.values()) clearTimeout(t); timers.clear(); items = await read('reminders', []); const now = Date.now(); for (const r of items) if (!r.done && r.due > now) schedule(r); bus.emit('reminders', items); return items; }
 
 /** A calendar file with an alarm, so a phone or computer calendar can remind you even when JARVIS is closed. */
 export function toICS(r) {

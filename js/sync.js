@@ -3,7 +3,7 @@
 // account or server. One device packs everything into a file locked with a code;
 // you AirDrop (or send) the file to the other device and type the code there.
 // Nothing is uploaded anywhere. Merging only adds and updates; it never deletes.
-import { read, write, settings, saveSettingsNow } from './store.js';
+import { read, write, remove as removeKey, settings, saveSettingsNow } from './store.js';
 
 const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'; // no 0/O, 1/I/L
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -51,7 +51,7 @@ export async function open(text, code) {
 }
 
 // Settings that describe *you* travel; device things (AI engine, voice, keys, permissions) stay put.
-const SHARED = ['assistantName', 'userName', 'honorific', 'personality', 'replyLanguage', 'aboutYou', 'customInstructions', 'profile', 'weather', 'briefing', 'reminders', 'skills', 'memory', 'appearance', 'theme', 'accent', 'instantCommands'];
+const SHARED = ['_changed', 'assistantName', 'userName', 'honorific', 'personality', 'replyLanguage', 'aboutYou', 'customInstructions', 'profile', 'weather', 'briefing', 'reminders', 'skills', 'memory', 'appearance', 'theme', 'accent', 'instantCommands'];
 const pick = (s) => Object.fromEntries(SHARED.filter((k) => s[k] !== undefined).map((k) => [k, structuredClone(s[k])]));
 
 /** Everything worth syncing from this device. Chats: the newest `chats` conversations. */
@@ -68,7 +68,8 @@ export async function collect({ chats = 40 } = {}) {
     settings: pick(settings),
     memory: await read('memory', []), skills: await read('skills', []), lists: await read('lists', {}), people: await read('people', []),
     reminders: await read('reminders', []), workouts: await read('workouts', []),
-    projects: await read('projects', []), planner: await read('planner', {}),
+    projects: await read('projects', []), planner: await read('planner', {}), links: await read('links', []),
+    tombstones: await read('tombstones', {}),
     sessionIndex: keep, sessions,
   };
 }
@@ -89,59 +90,87 @@ export function mergeBy(local = [], incoming = [], keyOf = (x) => x.id, combine 
 
 const low = (s) => String(s || '').toLowerCase().trim();
 
-/** Merge an incoming bundle into this device's data (pure: returns the new data + counts). */
-export function merge(local, incoming) {
+const filled = (o) => Object.fromEntries(Object.entries(o || {}).filter(([, v]) => v !== '' && v != null));
+const newerWins = (a, b) => (when(b) > when(a) ? b : a);
+
+/**
+ * Merge an incoming bundle into this device's data (pure: returns the new data + counts).
+ * live: settings follow whichever device changed each one last (used by live sync).
+ */
+export function merge(local, incoming, { live = false } = {}) {
   const counts = {};
-  const m = (name, a, b, key, combine) => { const r = mergeBy(a, b, key, combine); counts[name] = r.added; return r.list; };
+  // Deletions from both devices; something deleted after it was last changed stays deleted.
+  const tomb = { ...(local.tombstones || {}) };
+  for (const [k, t] of Object.entries(incoming.tombstones || {})) tomb[k] = Math.max(tomb[k] || 0, t);
+  const alive = (key, x) => { const t = tomb[String(key).toLowerCase()]; return !t || when(x) > t; };
+  const keep = (list, keyOf) => (list || []).filter((x) => x && alive(keyOf(x), x));
+  const m = (name, a, b, key, combine, tkey = key) => { const before = new Set(keep(a, tkey).map(key)); const r = mergeBy(keep(a, tkey), keep(b, tkey), key, combine); counts[name] = r.list.filter((x) => !before.has(key(x))).length; return r.list; };
   const out = {};
-  out.memory = m('memories', local.memory, incoming.memory, (x) => low(x.text));
-  out.skills = m('plugins', local.skills, incoming.skills, (x) => low(x.command), (a) => a);
-  out.people = m('people', local.people, incoming.people, (x) => low(x.name), (a, b) => ({ ...b, ...Object.fromEntries(Object.entries(a).filter(([, v]) => v !== '' && v != null)), id: a.id }));
-  out.reminders = m('reminders', local.reminders, incoming.reminders, (x) => x.id, (a, b) => ({ ...a, done: a.done || b.done }));
-  out.workouts = m('workouts', local.workouts, incoming.workouts, (x) => x.id);
-  out.projects = m('projects', local.projects, incoming.projects, (x) => x.id);
+  out.tombstones = tomb;
+  out.memory = m('memories', local.memory, incoming.memory, (x) => low(x.text), undefined, (x) => 'memory:' + x.text.trim());
+  out.skills = m('plugins', local.skills, incoming.skills, (x) => low(x.command), newerWins, (x) => 'skill:' + x.command);
+  out.people = m('people', local.people, incoming.people, (x) => low(x.name), (a, b) => (when(b) > when(a) ? { ...a, ...filled(b), id: a.id } : { ...b, ...filled(a), id: a.id }), (x) => 'person:' + x.name.trim());
+  out.reminders = m('reminders', local.reminders, incoming.reminders, (x) => x.id, (a, b) => ({ ...newerWins(a, b), done: a.done || b.done }), (x) => 'reminder:' + x.id);
+  out.workouts = m('workouts', local.workouts, incoming.workouts, (x) => x.id, undefined, (x) => 'workout:' + x.id);
+  out.projects = m('projects', local.projects, incoming.projects, (x) => x.id, undefined, (x) => 'project:' + x.id);
+  out.links = m('links', local.links, incoming.links, (x) => x.url, newerWins, (x) => 'link:' + x.url);
   // Planner: habits joined by name (ticked days from both), goals and money entries by id.
   const lp = local.planner || {}, ip = incoming.planner || {};
   out.planner = {
     ...lp,
-    habits: m('habits', lp.habits, ip.habits, (x) => low(x.name), (a, b) => ({ ...a, days: { ...(b.days || {}), ...(a.days || {}) } })),
-    goals: m('goals', lp.goals, ip.goals, (x) => x.id),
-    money: m('money entries', lp.money, ip.money, (x) => x.id),
+    habits: m('habits', lp.habits, ip.habits, (x) => low(x.name), (a, b) => ({ ...a, days: { ...(b.days || {}), ...(a.days || {}) } }), (x) => 'habit:' + x.name.trim()),
+    goals: m('goals', lp.goals, ip.goals, (x) => x.id, newerWins, (x) => 'goal:' + x.id),
+    money: m('money entries', lp.money, ip.money, (x) => x.id, undefined, (x) => 'money:' + x.id),
     budget: lp.budget?.monthly ? lp.budget : ip.budget || lp.budget || { monthly: 0 },
     stopwatch: lp.stopwatch || { start: 0, elapsed: 0, laps: [] },
   };
-  out.lists = { ...(local.lists || {}) };
+  out.lists = {};
   counts['list items'] = 0;
-  for (const [name, items] of Object.entries(incoming.lists || {})) {
-    const r = mergeBy(out.lists[name] || [], items, (x) => low(x.text), (a, b) => ({ ...a, done: a.done || b.done }));
-    out.lists[name] = r.list; counts['list items'] += r.added;
+  for (const name of new Set([...Object.keys(local.lists || {}), ...Object.keys(incoming.lists || {})])) {
+    const tk = (x) => `list:${name}:${x.text.trim()}`;
+    const a = keep(local.lists?.[name], tk), before = new Set(a.map((x) => low(x.text)));
+    // Ticked/unticked: the most recent change wins (older items without a time: ticked wins).
+    const r = mergeBy(a, keep(incoming.lists?.[name], tk), (x) => low(x.text), (x, y) => (x.updated || y.updated ? newerWins(x, y) : { ...x, done: x.done || y.done }));
+    if (r.list.length || local.lists?.[name]) out.lists[name] = r.list;
+    counts['list items'] += r.list.filter((x) => !before.has(low(x.text))).length;
   }
-  const idx = mergeBy(local.sessionIndex || [], incoming.sessionIndex || [], (x) => x.id);
+  const tc = (x) => 'chat:' + x.id;
+  const before = new Set(keep(local.sessionIndex, tc).map((x) => x.id));
+  const idx = mergeBy(keep(local.sessionIndex, tc), keep(incoming.sessionIndex, tc), (x) => x.id);
   out.sessionIndex = idx.list.sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  counts.chats = idx.added;
+  counts.chats = idx.list.filter((x) => !before.has(x.id)).length;
   const newer = new Set((incoming.sessionIndex || []).filter((e) => { const l = (local.sessionIndex || []).find((x) => x.id === e.id); return !l || (e.updated || 0) > (l.updated || 0); }).map((e) => e.id));
-  out.sessions = (incoming.sessions || []).filter((s) => newer.has(s.id));
+  out.sessions = keep(incoming.sessions, tc).filter((s) => newer.has(s.id));
+  out.deletedChats = (local.sessionIndex || []).filter((x) => !alive(tc(x), x)).map((x) => x.id);
   // Settings: the incoming device's "about you" settings, but never empty values over filled ones.
+  // Live sync: each setting follows the device that changed it most recently.
   out.settings = {};
+  const lc = local.settings?._changed || {}, ic = incoming.settings?._changed || {};
   for (const [k, v] of Object.entries(incoming.settings || {})) {
-    if (v === '' || v == null) continue;
-    out.settings[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...(local.settings?.[k] || {}), ...Object.fromEntries(Object.entries(v).filter(([, x]) => x !== '' && x != null)) } : v;
+    if (v === '' || v == null || k === '_changed') continue;
+    if (live && (ic[k] || 0) <= (lc[k] || 0)) continue;
+    out.settings[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...(local.settings?.[k] || {}), ...filled(v) } : v;
   }
+  out.settings._changed = { ...lc };
+  for (const [k, t] of Object.entries(ic)) out.settings._changed[k] = Math.max(out.settings._changed[k] || 0, t);
   if (out.settings.briefing) out.settings.briefing.last = local.settings?.briefing?.last || '';
   return { data: out, counts };
 }
 
 /** Apply an incoming bundle to this device. Returns the counts of what was added. */
-export async function apply(incoming) {
+export async function apply(incoming, { live = false } = {}) {
   const local = await collect({ chats: 100000 });
   local.lists = await read('lists', {});
-  const { data, counts } = merge(local, incoming);
+  const { data, counts } = merge(local, incoming, { live });
   // Past reminders from the other device were already announced there.
   const now = Date.now();
   for (const r of data.reminders) if (!r.done && r.due < now - 60000 && !local.reminders.some((x) => x.id === r.id)) r.done = true;
   await write('memory', data.memory); await write('skills', data.skills); await write('people', data.people);
   await write('reminders', data.reminders); await write('workouts', data.workouts); await write('lists', data.lists);
-  await write('projects', data.projects); await write('planner', data.planner);
+  await write('projects', data.projects); await write('planner', data.planner); await write('links', data.links);
+  const { setTombstones } = await import('./store.js');
+  await setTombstones(data.tombstones);
+  for (const id of data.deletedChats) await removeKey('session-' + id);
   for (const s of data.sessions) await write('session-' + s.id, s);
   await write('sessions', data.sessionIndex);
   Object.assign(settings, data.settings);

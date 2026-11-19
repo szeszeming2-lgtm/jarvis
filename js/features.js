@@ -9,6 +9,7 @@ export const FEATURES = [
     ['Several AI models (Ollama on computers; built-in models on phones and tablets)', 'all', 'one-time model download'],
     ['Deep research with sources and a fact-checking reviewer', 'all', 'internet; whole web in the Mac app, Wikipedia in browsers'],
     ['Team of AI agents (planner → expert → critic → editor)', 'all', ''],
+    ['Mission Control: up to 10 objectives, specialist agents, your approval before plans run and before anything is saved, live board, final reports', 'all', 'agents take turns on your device’s AI'],
   ]],
   ['Voice', [
     ['“JARVIS” / “Hey JARVIS” wake word, answers “Yes?”', 'mac', 'microphone'],
@@ -29,6 +30,8 @@ export const FEATURES = [
   ]],
   ['Productivity', [
     ['Reminders (one-off and repeating), text me / call me', 'all', 'texts and calls come from the Mac app'],
+    ['Make your iPhone ring for calls and texts (even when locked)', 'mac', 'iCloud Reminders on your iPhone'],
+    ['Saved links (read later), page summaries', 'all', 'summaries need the Mac app'],
     ['Calendar in the morning briefing', 'mac', 'calendar permission'],
     ['Lists, notes, to-dos, shopping', 'all', ''],
     ['Projects with tasks, progress, notes, documents and chats', 'all', ''],
@@ -49,6 +52,7 @@ export const FEATURES = [
   ]],
   ['Plugins, sync and privacy', [
     ['Plugin store, make your own, share and paste community plugins', 'all', ''],
+    ['Sign in with a secret phrase: live sync between your devices, deletions included', 'all', 'internet; JARVIS open on both (the Mac app stays open)'],
     ['Link devices (no account) and back up / restore everything', 'all', 'AirDrop or any way to send a file'],
     ['Floating orb, always-on-top window, global hotkeys', 'mac', ''],
     ['Permissions, activity log, export and delete your data, no tracking', 'all', ''],
@@ -57,6 +61,9 @@ export const FEATURES = [
 ];
 
 export const NOT_YET = [
+  'A real phone call to your own number: that needs a paid phone line. Instead the Mac app texts you a call link and makes your iPhone ring with an alert.',
+  'Talking to JARVIS while your iPhone is locked or JARVIS is in the background: iPhones only let Siri listen then. The Mac app keeps listening for its wake word while it runs.',
+  'Email, smart home, team workspaces and other online accounts: they need paid services or sign-ins that aren’t built.',
   'A full visual drag-and-drop workflow canvas: workflows are built as a list of steps (Plugins → Make a plugin → Actions).',
   'Translating the app’s own buttons into other languages: replies already come in your language.',
   'Native Windows, Linux, iPhone and Android apps: use the website there (it installs to the Home Screen).',

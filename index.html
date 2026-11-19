@@ -6,7 +6,7 @@
   <title>JARVIS</title>
   <meta name="description" content="JARVIS: a free, private AI assistant that runs on your own computer.">
   <meta name="color-scheme" content="dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: wss://0.peerjs.com; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#040a17">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -44,6 +44,7 @@
       </label>
       <nav class="session-list" id="sessionList" aria-label="Conversation history"></nav>
       <div class="side-nav">
+        <button class="nav-btn mission-nav" type="button" data-open="mission" data-icon="zap">Mission Control</button>
         <button class="nav-btn" type="button" data-open="projects" data-icon="folder">Projects</button>
         <button class="nav-btn" type="button" data-open="planner" data-icon="target">Planner</button>
         <button class="nav-btn" type="button" data-open="lists" data-icon="list">Lists</button>

@@ -1,6 +1,6 @@
 // Projects: a folder for each thing you're working on, with notes, tasks (and
 // progress), documents and linked conversations. Saved only on this device.
-import { read, write } from './store.js';
+import { read, write, tombstone } from './store.js';
 import { bus, uid } from './util.js';
 
 let projects = [];
@@ -33,7 +33,7 @@ export function rename(id, name) { const p = get(id); if (p && name.trim()) { p.
 export function setNotes(id, notes) { const p = get(id); if (p) { p.notes = String(notes).slice(0, 100000); touch(p); } }
 export function setGoal(id, goal) { const p = get(id); if (p) { p.goal = String(goal).slice(0, 300); touch(p); } }
 export function archive(id, on = true) { const p = get(id); if (p) { p.archived = on; touch(p); } }
-export function remove(id) { projects = projects.filter((p) => p.id !== id); save(); }
+export function remove(id) { tombstone('project:' + id); projects = projects.filter((p) => p.id !== id); save(); }
 
 export function addTask(id, text, due = null) {
   const p = get(id);

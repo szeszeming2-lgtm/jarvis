@@ -1,5 +1,5 @@
 // Conversation sessions. Index in "sessions"; each conversation in "session-<id>".
-import { read, write, remove as removeKey, writeSoon } from './store.js';
+import { read, write, remove as removeKey, writeSoon, tombstone } from './store.js';
 import { bus, uid, truncate } from './util.js';
 
 export const state = { index: [], current: null };
@@ -79,6 +79,7 @@ export async function pin(id, on) {
 }
 
 export async function remove(id) {
+  tombstone('chat:' + id);
   state.index = state.index.filter((x) => x.id !== id);
   await removeKey('session-' + id);
   saveIndex();
@@ -87,6 +88,7 @@ export async function remove(id) {
 }
 
 export async function removeAll() {
+  tombstone(...state.index.map((e) => 'chat:' + e.id));
   for (const e of state.index) await removeKey('session-' + e.id);
   state.index = [];
   await write('sessions', []);

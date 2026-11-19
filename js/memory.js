@@ -1,5 +1,5 @@
 // Long-term memory: short facts the user controls. Stored locally, never shared.
-import { read, write } from './store.js';
+import { read, write, tombstone } from './store.js';
 import { bus, uid } from './util.js';
 
 let items = [];
@@ -34,8 +34,8 @@ export async function update(id, patch) {
   return m;
 }
 
-export async function remove(id) { items = items.filter((m) => m.id !== id); save(); }
-export async function clear() { items = []; save(); }
+export async function remove(id) { const m = items.find((x) => x.id === id); if (m) tombstone('memory:' + m.text.trim()); items = items.filter((x) => x.id !== id); save(); }
+export async function clear() { tombstone(...items.map((m) => 'memory:' + m.text.trim())); items = []; save(); }
 export async function replaceAll(list) { items = list; save(); }
 
 const STOP = new Set('a an the and or but of to in on at for with my me i is are was be it that this you your what who how do does did can could would should will about from'.split(' '));

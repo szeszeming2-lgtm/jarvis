@@ -13,6 +13,16 @@ export async function read(key, fallback = null) {
   }
 }
 
+// Deletions are remembered (key → when) so a synced device deletes them too instead of
+// bringing them back. Keys look like "list:shopping:milk", "person:sam", "chat:<id>".
+let tombs = null;
+export async function tombstones() { if (!tombs) tombs = (await read('tombstones', {})) || {}; return tombs; }
+export function tombstone(...keys) {
+  tombstones().then((t) => { const now = Date.now(); for (const k of keys) if (k) t[String(k).toLowerCase()] = now; return write('tombstones', t); })
+    .then(() => bus.emit('tombstones', 1)).catch(console.error);
+}
+export function setTombstones(t) { tombs = t; return write('tombstones', t); }
+
 export async function write(key, value) {
   return call('store.write', { key, value: JSON.stringify(value) });
 }
@@ -114,6 +124,8 @@ export function set(path, value) {
   let o = settings;
   for (const p of parts.slice(0, -1)) o = o[p] ??= {};
   o[parts.at(-1)] = value;
+  // Remember when each part changed, so live sync knows which device's setting is newer.
+  if (parts[0] !== '_changed' && parts[0] !== 'syncPhrase') { settings._changed ||= {}; settings._changed[parts[0]] = Date.now(); }
   writeSoon('settings', () => settings, 200);
   bus.emit('settings', { path, value });
 }

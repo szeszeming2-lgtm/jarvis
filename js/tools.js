@@ -184,7 +184,8 @@ export const TOOLS = [
       if (!to) throw new Error('Tell me your number first: say “my number is +1 555 123 4567”. It stays on this device.');
       if (!can('messages')) throw new Error('Calls to you come from the JARVIS Mac app (it uses Messages on your Mac). Ask it on your Mac, or keep it running in the menu bar.');
       const r = await call('messages.send', { to, text: callText(a.message || '') });
-      return { sent: !!r?.sent, drafted: !!r?.drafted };
+      const alert = await ringPhone(`📞 ${settings.assistantName || 'JARVIS'} is calling you${a.message ? `: ${a.message}` : ''}`, 'Open the message from yourself to answer the call.');
+      return { sent: !!r?.sent, drafted: !!r?.drafted, alert };
     },
     done: (r) => (r.sent ? 'Calling you' : 'Call link ready to send') },
   { name: 'set_my_number', icon: 'user', group: 'contact',
@@ -216,7 +217,9 @@ export const TOOLS = [
         return { to: who.label, app: APPS[who.app].label, how: who.how };
       }
       const r = await call('messages.send', { to: who.address, text: a.message });
-      return { to: who.label, sent: !!r?.sent, drafted: !!r?.drafted };
+      // A text to yourself often arrives without a sound: also make the phone ring with an alert.
+      const alert = /^(me|myself)$/i.test(String(a.to || '').trim()) ? await ringPhone(`💬 ${settings.assistantName || 'JARVIS'}: ${a.message}`, a.message) : false;
+      return { to: who.label, sent: !!r?.sent, drafted: !!r?.drafted, alert };
     },
     done: (r) => (r.app ? `${r.app}: ${r.to}` : r.sent ? `Texted ${r.to}` : `Text ready for ${r.to}`) },
   { name: 'make_call', category: 'calls', icon: 'phone', group: 'contact', alwaysAsk: true,
@@ -295,6 +298,18 @@ export const TOOLS = [
       return { prompt: a.prompt, picture: `data:${r.type};base64,${r.image}` };
     },
     done: () => 'Picture made' },
+  { name: 'save_link', icon: 'globe', group: 'basics',
+    ...s('Save a web link for the user to read later (their Saved links).', { url: { type: 'string' }, note: { type: 'string' } }, ['url']),
+    run: async (a) => { const L = await import('./links.js'); const l = L.add(a.url, { note: a.note || '' }); return { url: l.url, title: l.title, existed: !!l.existed, count: L.all().length }; },
+    done: (r) => `Saved ${r.title}` },
+  { name: 'show_links', icon: 'globe', group: 'basics',
+    ...s('List the user\'s saved links (optionally matching some words).', { query: { type: 'string' } }),
+    run: async (a) => { const L = await import('./links.js'); const items = (a.query ? L.search(a.query) : L.all().filter((l) => !l.read)).slice(0, 12); return { links: items.map((l) => ({ title: l.title, url: l.url })), total: L.all().length }; },
+    done: (r) => `${r.links.length} links` },
+  { name: 'summarize_page', icon: 'globe', group: 'web', needs: 'webFetch', category: 'web',
+    ...s('Read a web page and return its text so you can summarize or answer questions about it (Mac app).', { url: { type: 'string' } }, ['url']),
+    run: async (a) => { const L = await import('./links.js'); const p = await L.pageText(L.findUrl(a.url) || a.url); return { title: p.title, text: p.text.slice(0, 12000) }; },
+    done: (r) => `Read ${r.title || 'the page'}` },
   { name: 'take_screenshot', icon: 'display', group: 'files', needs: 'screenshot', category: 'screen',
     ...s('Take a screenshot of the screen and save it to the Desktop.', {}),
     run: async () => call('screenshot.save', {}), reveal: (r) => r.path, done: (r) => `Saved ${r.name}` },
@@ -575,6 +590,16 @@ export function homeLink(home, mode = settings.profile?.travel) {
   const enc = encodeURIComponent(home);
   if (apple && m !== 'c') return { app: 'Apple Maps', mode: word, url: `${isNative ? 'maps://' : 'https://maps.apple.com/'}?daddr=${enc}&dirflg=${m}` };
   return { app: 'Google Maps', mode: word, url: `https://www.google.com/maps/dir/?api=1&destination=${enc}&travelmode=${{ d: 'driving', w: 'walking', r: 'transit', c: 'bicycling' }[m]}` };
+}
+
+/** Make the user's iPhone alert now (iCloud Reminders, Mac app). Removed again after 15 minutes. */
+async function ringPhone(title, notes = '') {
+  if (!can('phoneAlert') || settings.profile?.phoneAlerts === false) return false;
+  try {
+    const r = await call('phone.alert', { title, notes, inSeconds: 40 });
+    setTimeout(() => call('reminders.remove', { id: r.id }).catch(() => {}), 15 * 60000);
+    return true;
+  } catch { return false; }
 }
 
 /** The text that rings your phone: tapping the link opens JARVIS's incoming-call screen. */

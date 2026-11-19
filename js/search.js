@@ -8,13 +8,14 @@ import * as people from './people.js';
 import * as memory from './memory.js';
 import * as reminders from './reminders.js';
 import * as skills from './skills.js';
+import * as links from './links.js';
 import { describeWhen } from './when.js';
 
 export const SETTINGS_PAGES = [
   ['general', 'General settings', 'name, number, home address, briefing, link devices'], ['models', 'AI models', 'download, choose model, ollama'], ['voice', 'Voice', 'speak, voice, wake word, microphone, push to talk'],
   ['plugins', 'Plugins', 'plugin store, add plugin'], ['workout', 'Workouts', 'exercise, reps, coach'], ['lists', 'Lists & People', 'shopping, to-do, contacts'],
   ['sync', 'Link devices', 'sync, sign in, iPad, iPhone'], ['projects', 'Projects', 'tasks, notes, documents, knowledge map'], ['planner', 'Planner', 'habits, goals, budget, stopwatch, voice notes'],
-  ['memory', 'Memory', 'remember, forget'], ['appearance', 'Appearance', 'theme, colors, dark, light, animations'], ['home', 'Home screen', 'dashboard, widgets, cards'],
+  ['memory', 'Memory', 'remember, forget'], ['links', 'Saved links', 'bookmarks, read later, reading list'], ['appearance', 'Appearance', 'theme, colors, dark, light, animations'], ['home', 'Home screen', 'dashboard, widgets, cards'],
   ['shortcuts', 'Keyboard shortcuts', 'keys, hotkeys'], ['permissions', 'Permissions', 'allow, ask, privacy, security'], ['privacy', 'Privacy & data', 'export, backup, restore, delete'], ['about', 'About & help', 'features, version, help'],
 ];
 
@@ -42,6 +43,7 @@ export async function search(q, { limit = 40, deep = true } = {}) {
   for (const [name, items] of Object.entries(lists.all())) for (const i of items) if (hit(i.text, ts)) push({ kind: 'list', icon: 'list', title: i.text, sub: `${lists.title(name)} list${i.done ? ' · done' : ''}`, score: 6, open: { type: 'tab', tab: 'lists' } });
   for (const m of memory.all()) if (hit(m.text, ts)) push({ kind: 'memory', icon: 'brain', title: m.text, sub: 'Memory', score: 5, open: { type: 'tab', tab: 'memory' } });
   for (const r of reminders.upcoming()) if (hit(r.text, ts)) push({ kind: 'reminder', icon: 'bell', title: r.text, sub: `Reminder · ${describeWhen(new Date(r.due))}`, score: 7, open: { type: 'tab', tab: 'lists' } });
+  for (const l of links.all()) if (hit(`${l.title} ${l.url} ${l.note} ${l.desc || ''}`, ts)) push({ kind: 'link', icon: 'globe', title: l.title, sub: `Saved link · ${l.url}`, score: 6, open: { type: 'url', url: l.url } });
   for (const s of skills.all()) if (hit(`${s.name} ${s.description} ${s.command}`, ts)) push({ kind: 'plugin', icon: s.icon || 'puzzle', title: s.name, sub: `Plugin · /${s.command}`, score: 4, open: { type: 'tab', tab: 'plugins' } });
   for (const [id, title, keys] of SETTINGS_PAGES) if (hit(`${title} ${keys}`, ts)) push({ kind: 'setting', icon: 'gear', title, sub: 'Settings', score: 3, open: { type: 'tab', tab: id } });
   // Conversations: titles and previews first, then the full text of recent ones.

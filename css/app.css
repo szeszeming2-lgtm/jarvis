@@ -704,3 +704,41 @@ input[type="color"] { width: 38px; height: 30px; border: 1px solid var(--line); 
 .feat-list li.other { color: var(--text-dim); }
 .feat-list li.other svg { color: var(--text-faint); }
 .feat-list small { color: var(--text-faint); }
+
+.ask-mic { width: 46px; height: 46px; flex: none; }
+.ask-mic.live { background: rgba(var(--accent-rgb), .3); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35), 0 0 20px rgba(var(--accent-rgb), .6); }
+
+.link-title { all: unset; cursor: pointer; font-weight: 550; color: var(--text); overflow: hidden; text-overflow: ellipsis; display: block; max-width: 100%; }
+.link-title:hover { color: var(--accent); text-decoration: underline; }
+
+/* Mission Control */
+.mission-nav { color: var(--accent) !important; }
+.missions { display: flex; flex-direction: column; gap: 14px; }
+.ms-card { border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); }
+.ms-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
+.ms-goal { font-weight: 600; font-size: 15px; }
+.ms-status { flex: none; }
+.ms-status.running, .ms-status.planning { color: var(--accent); border-color: var(--line-strong); }
+.ms-status.awaiting-approval, .ms-status.waiting { color: var(--warn); border-color: rgba(255,181,71,.4); }
+.ms-status.done { color: var(--ok); border-color: rgba(60,240,165,.4); }
+.ms-status.failed { color: var(--danger); }
+.ms-plan { border: 1px dashed var(--line-strong); border-radius: 12px; padding: 10px; }
+.ms-plan-row { display: flex; gap: 8px; align-items: center; padding: 4px 0; font-size: 13.5px; }
+.ms-plan-row .grow { flex: 1; min-width: 0; }
+.ms-agent { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; padding: 2px 7px; border-radius: 999px; background: rgba(var(--accent-rgb), .12); color: var(--accent); flex: none; white-space: nowrap; }
+.ms-agent svg { width: 11px; height: 11px; }
+.ms-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 760px) { .ms-board { grid-template-columns: 1fr 1fr; } }
+.ms-col { background: rgba(0,0,0,.14); border: 1px solid var(--line); border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
+.ms-col-head { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); }
+.ms-col.running { border-color: var(--line-strong); }
+.ms-col.needs-approval { border-color: rgba(255,181,71,.45); }
+.ms-task { border-radius: 10px; border: 1px solid var(--line); background: var(--glass); padding: 7px; display: flex; flex-direction: column; gap: 4px; }
+.ms-task.running { box-shadow: 0 0 0 1px rgba(var(--accent-rgb), .4), 0 0 18px rgba(var(--accent-rgb), .18); animation: pulse-soft 2s ease-in-out infinite; }
+@keyframes pulse-soft { 50% { box-shadow: 0 0 0 1px rgba(var(--accent-rgb), .6), 0 0 26px rgba(var(--accent-rgb), .3); } }
+.ms-task-top { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.ms-task-title { font-size: 12.5px; line-height: 1.35; }
+.ms-action { border-top: 1px solid var(--line); padding-top: 6px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.ms-action pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 11px; max-height: 120px; overflow: auto; background: rgba(0,0,0,.25); border-radius: 8px; padding: 6px; }
+.ms-output, .ms-report { font-size: 13px; max-height: 360px; overflow: auto; }
+.ms-controls { justify-content: flex-end; }

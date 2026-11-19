@@ -5,6 +5,43 @@ import { registerTab } from './sheets.js';
 import { section, toast, callout, dialog, toggle, row, rows } from './common.js';
 import { call, can, isNative } from '../host.js';
 import * as sync from '../sync.js';
+import * as live from '../livesync.js';
+import { settings } from '../store.js';
+import { bus, timeAgo } from '../util.js';
+
+/** "Sign in" with a secret phrase: live sync between your devices, no account. */
+function signInSection() {
+  const box = h('div');
+  const statusText = () => {
+    const s = live.state;
+    return { off: 'Not signed in.', connecting: 'Connecting…', waiting: `Signed in. Waiting for your other devices${s.role === 'hub' ? ' (this one is the hub)' : ''}.`, connected: `Connected to ${s.peers} other device${s.peers === 1 ? '' : 's'}.${s.lastSync ? ` Last synced ${timeAgo(s.lastSync)}.` : ''}`, error: `Not connected: ${s.error}` }[s.status] || s.status;
+  };
+  const draw = () => {
+    if (!live.signedIn()) {
+      const input = h('input', { class: 'field', placeholder: 'e.g. maple orbit falcon river ember quartz lotus sky', 'aria-label': 'Secret phrase', style: { width: '100%', fontFamily: 'var(--mono)' }, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
+      box.replaceChildren(
+        h('p', { class: 'muted', style: { margin: '0 0 10px', fontSize: '13px', lineHeight: 1.5 }, text: 'Use the same secret phrase on your iPhone, iPad and Mac and they stay the same automatically: lists, people, reminders, projects, plugins, memories, links, chats and settings. No account, no email, no password reset: the phrase is the key, so keep it somewhere safe.' }),
+        h('div', { class: 'flex', style: { marginBottom: '10px' } },
+          h('button', { class: 'btn btn-primary', type: 'button', onclick: () => { input.value = live.newPhrase(); input.focus(); toast('Write this phrase down, then type it on your other devices.', { ms: 6000 }); } }, iconNode('sparkles'), 'Make a new phrase')),
+        input,
+        h('div', { class: 'flex', style: { marginTop: '10px' } },
+          h('button', { class: 'btn btn-primary', type: 'button', onclick: async () => { try { await live.signIn(input.value); toast('Signed in. This device will stay in step with your others.'); } catch (e) { toast(e.message, { bad: true, ms: 6000 }); } } }, iconNode('lock'), 'Sign in with this phrase')));
+      return;
+    }
+    const phrase = h('span', { class: 'mono', text: '•••• •••• •••• ••••' });
+    box.replaceChildren(
+      h('div', { class: 'callout' }, iconNode(live.state.status === 'connected' ? 'check' : live.state.status === 'error' ? 'alert' : 'refresh'), h('div', {}, h('b', { text: statusText() }), live.state.added ? h('div', { class: 'muted', text: live.state.added }) : null)),
+      h('div', { class: 'flex', style: { marginTop: '10px', flexWrap: 'wrap' } },
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { live.syncNow(); live.connect(); toast('Syncing…'); } }, iconNode('refresh'), 'Sync now'),
+        h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: (e) => { phrase.textContent = phrase.textContent.startsWith('•') ? settings.syncPhrase : '•••• •••• •••• ••••'; } }, 'Show phrase'), phrase,
+        h('button', { class: 'btn btn-sm btn-ghost danger', type: 'button', onclick: async () => { if (await dialog({ title: 'Sign out of sync?', text: 'This device keeps everything it has, but stops syncing. Your other devices are not changed.', okLabel: 'Sign out', danger: true })) live.signOut(); } }, 'Sign out')));
+  };
+  const off = bus.on('livesync', draw);
+  bus.on('settings', (d) => { if (d?.path === 'syncPhrase') draw(); });
+  draw();
+  box.dispose = off;
+  return section('Sign in (secret phrase)', 'Live sync between your devices. Devices talk directly and encrypted; a free service (PeerJS) only helps them find each other and never sees your data. Syncs while JARVIS is open on both (the Mac app stays open in the background).', box);
+}
 
 const iPadOS = () => navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent);
 const phone = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || iPadOS();
@@ -54,8 +91,9 @@ registerTab('sync', (body) => {
     } catch (e) { toast(e.message, { bad: true, ms: 6000 }); }
   };
   body.append(
+    signInSection(),
     callout('<b>Same JARVIS on every device, no account needed.</b> Your phone and computer each keep their own copy. Linking sends a locked file from one to the other (AirDrop works great), so nothing ever goes to a server.', { icon: 'refresh' }),
-    section('Send to another device', 'From this device to your other one.', rows(
+    section('Or send a one-time copy', 'From this device to your other one, by AirDrop or any app.', rows(
       row('Include chats', 'Your 40 most recent conversations (pictures stay here).', toggle(chats, (v) => (chats = v), 'Include chats')),
       row('', '', h('button', { class: 'btn btn-primary', type: 'button', onclick: send }, iconNode('upload'), 'Send everything'))), out),
     section('Receive from another device', 'Got a JARVIS link file? Open it here.', h('button', { class: 'btn', type: 'button', onclick: receive }, iconNode('download'), 'Receive (choose the file)')),

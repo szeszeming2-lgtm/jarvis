@@ -10,6 +10,7 @@ import { HANDLES } from './people.js';
 import { find as findMode } from './modes.js';
 import { findHabit } from './planner.js';
 import { parseRequest as parseAutomation } from './automations.js';
+import { findUrl } from './links.js';
 
 const listWords = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]);
 
@@ -55,6 +56,17 @@ export function match(raw, { customSkills = [] } = {}) {
   if ((r = t.match(/^(?:i )?(?:finished|completed|did|done with|tick off|check off) (.+?) (?:in|for|on) (?:my |the |our )?(.+?) project$/i))) return { tool: 'complete_project_task', args: { project: r[2], task: r[1] } };
   if (/^(?:show |list |open )?(?:my |all )?projects$/i.test(low)) return { tool: 'project_status', args: {} };
   if ((r = low.match(/^how(?:'s| is| are) (?:my |the |our )?(.+?) project(?: going| doing)?$|^(?:status|progress) (?:of|on) (?:my |the )?(.+?)(?: project)?$/))) return { tool: 'project_status', args: { project: r[1] || r[2] } };
+
+  // Mission Control: "mission: plan my trip; write my speech", "new mission …", "open mission control"
+  if (/^(?:open |show )?mission control$|^(?:my )?missions$/i.test(low)) return { local: 'open', tab: 'mission', say: 'Here’s Mission Control. Give me objectives and watch the agents work.' };
+  if ((r = t.match(/^(?:new mission|start (?:a )?mission|mission|missions|give (?:jarvis|you) (?:these )?objectives|objectives?)\s*[:-]?\s+([\s\S]{4,2000})$/i))) return { local: 'mission', goals: r[1] };
+
+  // Saved links: "save this link https://…", "bookmark example.com", "my links", or just paste a link
+  if ((r = t.match(/^(?:save|keep|bookmark|remember|add)(?: this| the| that)?(?: link| page| website| url| article)?(?: for later| to read later)?:? (\S+\.\S+)(?: (?:for later|as|about|note:?) (.+))?$/i)) && findUrl(r[1])) return { tool: 'save_link', args: { url: findUrl(r[1]), note: r[2] || '' } };
+  if ((r = t.match(/^(?:read later|read it later):? (\S+\.\S+)$/i)) && findUrl(r[1])) return { tool: 'save_link', args: { url: findUrl(r[1]) } };
+  if (/^(?:show |open )?(?:my )?(?:saved )?(?:links|bookmarks|reading list|read later list)$/i.test(low)) return { tool: 'show_links', args: {} };
+  if ((r = t.match(/^(?:summari[sz]e|sum up|read|explain|what does) (?:this |the )?(?:page|article|link|website)?:? ?(https?:\/\/\S+|\S+\.(?:com|org|net|io|co|edu|gov)\S*)(?: say)?$/i)) && findUrl(r[1])) return { local: 'summarize', url: findUrl(r[1]) };
+  if (/^\s*(https?:\/\/\S+|www\.\S+)\s*$/i.test(t) && findUrl(t)) return { tool: 'save_link', args: { url: findUrl(t) }, pasted: true };
 
   // Study: flashcards and comparing documents
   if ((r = t.match(/^(?:make|create|give me|generate) (?:some |me )?flash ?cards(?: (?:about|on|for|of|from) (.{2,160}))?$/i))) return /^(?:a |this |my |the )?(?:document|file|pdf|notes?)$/i.test(r[1] || 'document') ? { local: 'cards', fromFile: true } : { local: 'cards', topic: r[1] };
@@ -194,7 +206,8 @@ export function match(raw, { customSkills = [] } = {}) {
 
   // Texts: "text Mom saying I'm on my way", "message +1 555 0100: hi", "text me buy milk"
   if ((r = t.match(/^(?:text|message|imessage|send (?:a )?(?:text|message) to) (.+?)(?:\s*:\s*|\s+saying\s+|\s+that says\s+|\s+that\s+)(.+)$/i))) return { tool: 'send_text', args: { to: r[1].replace(/^my /i, ''), message: r[2] } };
-  if ((r = t.match(/^text me (.+)$/i))) return { tool: 'send_text', args: { to: 'me', message: r[1] } };
+  if ((r = t.match(/^text me (.+)$/i)) && !/^(at|on|when|later|tomorrow|in \d)/i.test(r[1])) return { tool: 'send_text', args: { to: 'me', message: r[1] } };
+  if (/^(?:ok(?:ay)?,? )?(?:then )?(?:text me|send me a (?:text|message)|message me|send a text to me|test (?:a )?text(?: me)?)(?: now| please| a test)?$/i.test(low)) return { tool: 'send_text', args: { to: 'me', message: 'Hi! This is a text from your assistant. Reply here any time.' } };
   // Calls: "call Mom", "facetime +44 20 7946 0000"
   if ((r = t.match(/^(call|phone|ring|dial|facetime)(?: up)? (.+)$/i)) && !/^(me|it|that|this|off|back)\b/i.test(r[2]) && r[2].split(/\s+/).length <= 4) return { tool: 'make_call', args: { to: r[2].replace(/^my /i, ''), facetime: /facetime/i.test(r[1]) } };
 
@@ -320,14 +333,14 @@ export function reply(intent, res, name = 'JARVIS') {
       return `I found ${r.count} file${r.count === 1 ? '' : 's'}${r.count > 8 ? ' (showing 8)' : ''}:\n\n${list}`;
     }
     case 'system_status': return statusText(r);
-    case 'call_me': return r.sent ? `Calling you now, check your iPhone. 📞` : `Messages opened with the call link ready. Press Send to ring your iPhone.`;
+    case 'call_me': return r.sent ? `Calling you now 📞${r.alert ? ' Your iPhone will ring with an alert in about a minute (even on the lock screen).' : ''} Open the message from yourself to answer.` : `Messages opened with the call link ready. Press Send to ring your iPhone.`;
     case 'set_my_number': return `Got it. I’ll text and call you at **${r.number}**. It’s saved only on this device. Try “text me hello” or “call me in 1 minute”.`;
     case 'set_reminder': if (intent.args.call_me) return `I’ll call you ${r.when}: **${r.text}**.${r.callNote ? ' ' + r.callNote : ''}`;
       return `I’ll remind you ${r.when}${r.texts ? ' and text you' : ''}: **${r.text}**.${r.inSystemReminders ? ' It’s in your Reminders app too, so your phone will remind you as well.' : ''}`;
     case 'list_reminders': return r.count ? `You have ${r.count} upcoming reminder${r.count === 1 ? '' : 's'}:\n\n${r.reminders.map((x) => `- **${x.text}** — ${x.when}`).join('\n')}` : 'You have no upcoming reminders.';
     case 'cancel_reminder': return `Cancelled ${r.cancelled} reminder${r.cancelled === 1 ? '' : 's'}.`;
     case 'send_text': if (r.app) return r.how === 'prefills' ? `${r.app} is open with your message to ${r.to}. Press Send.` : `${r.app} is open on your chat with ${r.to}. Your message is copied, so paste it and press Send.`;
-      return r.sent ? `Message sent to ${r.to}.` : `Your messages app is open with the text to ${r.to}. Press Send when you’re ready.`;
+      return r.sent ? `Message sent to ${r.to}.${r.alert ? ' Your iPhone will also ring with an alert in about a minute, because texts to yourself are often silent.' : ''}` : `Your messages app is open with the text to ${r.to}. Press Send when you’re ready.`;
     case 'make_call': if (r.how === 'opens') return `${r.app} is open on your chat with ${r.to}. Tap the ${intent.args.video ? 'video' : 'call'} button there (${r.app} doesn’t let other apps start calls).`;
       return `Calling ${r.to}${r.app && r.app !== 'Phone' ? ` on ${r.app}` : ''}.`;
     case 'add_to_list': return r.added.length ? `Added ${listWords(r.added)} to your ${r.list} list. ${r.count} item${r.count === 1 ? '' : 's'} on it now.` : `That’s already on your ${r.list} list.`;
@@ -357,6 +370,8 @@ export function reply(intent, res, name = 'JARVIS') {
     case 'set_budget': return `Monthly budget set to ${r.budget}.`;
     case 'stopwatch': return { start: `Stopwatch started.`, stop: `Stopwatch stopped at ${r.spoken}.`, lap: `Lap ${r.laps}: ${r.time}.`, reset: 'Stopwatch reset.', check: r.running ? `The stopwatch is at ${r.spoken}.` : `The stopwatch is stopped at ${r.spoken}.` }[r.action || 'check'];
     case 'create_automation': return `Automation set: **${r.when}** I’ll run “${r.command}”. It runs while JARVIS is open; you can see, pause or delete it in Planner → Automations.`;
+    case 'save_link': return r.existed ? `That link was already saved: **${r.title}**.` : `Saved to your links: **${r.title}**. You have ${r.count} saved. Say “my links” to see them${intent.pasted ? ', or “summarize” plus the link for a summary' : ''}.`;
+    case 'show_links': return r.links.length ? `Your saved links:\n\n${r.links.map((l) => `- [${l.title}](${l.url})`).join('\n')}` : 'No saved links yet. Paste a link and I’ll keep it.';
     case 'take_screenshot': return `Screenshot saved to your Desktop: **${r.name}**.`;
     case 'create_folder': return `Made the folder **${r.name}**.`;
     case 'rename_file': return `Renamed **${r.from}** to **${r.name}**.`;

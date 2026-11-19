@@ -3,6 +3,7 @@ import { h, $, iconNode, hydrateIcons, bus } from '../util.js';
 
 const TABS = [
   ['general', 'General', 'user'],
+  ['mission', 'Mission Control', 'zap'],
   ['models', 'AI Models', 'layers'],
   ['voice', 'Voice', 'mic'],
   ['plugins', 'Plugins', 'puzzle'],
@@ -10,6 +11,7 @@ const TABS = [
   ['projects', 'Projects', 'folder'],
   ['planner', 'Planner', 'target'],
   ['lists', 'Lists & People', 'list'],
+  ['links', 'Saved links', 'globe'],
   ['sync', 'Link devices', 'refresh'],
   ['memory', 'Memory', 'brain'],
   ['skills', 'Skills', 'puzzle'],

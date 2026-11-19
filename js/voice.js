@@ -8,6 +8,7 @@ import { toSpeech } from './markdown.js';
 export const voice = {
   listening: false, mode: null, speaking: false, partial: '', currentText: '', error: '',
   wakeArmed: false, // wake listening should be running when idle
+  capture: null,    // a screen (like Circle to Ask) can take the next thing you say instead of the chat
 };
 
 const pendingUtterances = new Set();

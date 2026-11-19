@@ -20,6 +20,7 @@ export function openSearch(q = '') {
     if (o.type === 'chat') { await sessions.open(o.id); return; }
     if (o.type === 'project') { const m = await import('./projects.js'); m.openProject?.(o.id); openSheet('projects'); return; }
     if (o.type === 'file') { call('tool.reveal', { path: o.path }).catch(() => {}); return; }
+    if (o.type === 'url') { call('tool.open_url', { url: o.url }).catch(() => window.open(o.url, '_blank', 'noopener')); return; }
     if (o.type === 'tab') openSheet(o.tab);
   };
   const draw = () => {
