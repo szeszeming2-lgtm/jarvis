@@ -4,6 +4,7 @@ import { h, $, iconNode, hydrateIcons, bus } from '../util.js';
 const TABS = [
   ['general', 'General', 'user'],
   ['profiles', 'Profiles', 'user'],
+  ['offline', 'Use offline', 'wifi'],
   ['companion', 'iPhone & Mac', 'phone'],
   ['command', 'Command Center', 'display'],
   ['mission', 'Mission Control', 'zap'],

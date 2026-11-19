@@ -28,6 +28,7 @@ import './ui/companion.js';
 import './ui/recordings.js';
 import './ui/calls.js';
 import './ui/imagine.js';
+import './ui/offline.js';
 import * as projects from './projects.js';
 import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
@@ -256,6 +257,8 @@ async function boot() {
   addEventListener('hashchange', checkForCall);
   // Offline: say so once, and show a small "offline" tag by the model name (the AI keeps working on the device).
   const netNote = () => document.documentElement.classList.toggle('is-offline', navigator.onLine === false);
+  // Phones: if something isn't saved for offline yet, say so once (and where to fix it).
+  addEventListener('offline', () => { if (isNative) return; import('./offline.js').then(async (O) => { const r = await O.readiness(); const missing = ['app', 'ai', 'voiceIn'].filter((k) => r[k] && !r[k].ok && r[k].fix); if (missing.length) toast(`Not everything is saved for offline yet (${missing.map((k) => ({ app: 'app files', ai: 'the AI', voiceIn: 'voice typing' }[k])).join(', ')}). When you’re back online: Settings → Use offline.`, { bad: true, ms: 9000 }); }).catch(() => {}); });
   addEventListener('offline', () => { netNote(); toast(ollama.isPhone() || isNative ? 'You’re offline. JARVIS still works: chat, lists, reminders, notes and more. Weather, news and research need internet.' : 'You’re offline. Weather, news and research need internet.', { icon: 'wifi', ms: 7000 }); });
   addEventListener('online', () => { netNote(); toast('Back online.', { icon: 'wifi' }); });
   netNote();

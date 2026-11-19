@@ -25,6 +25,48 @@ export async function call(method, params = {}) {
 }
 
 let cachedInfo = null;
+/** Offline voice typing: record until you stop talking, then Whisper turns it into text on this device. */
+async function whisperListen({ locale, mode }) {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('This browser can’t record audio.');
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', ''].find((t) => !t || MediaRecorder.isTypeSupported(t));
+  const rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+  const chunks = [];
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const an = ctx.createAnalyser(); an.fftSize = 1024; ctx.createMediaStreamSource(stream).connect(an);
+  const buf = new Float32Array(an.fftSize);
+  const started = Date.now();
+  let spoke = false, quietSince = 0, done = false, send = true;
+  const finish = (keep = true) => { if (done) return; done = true; send = keep; clearInterval(tick); try { rec.stop(); } catch {} };
+  rec.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop()); ctx.close().catch(() => {});
+    voiceState.rec = null;
+    if (!send || !spoke || !chunks.length) { events.emit('listen.final', { text: '' }); events.emit('listen.end', {}); return; }
+    events.emit('listen.partial', { text: 'Turning your words into text…' });
+    try {
+      const media = await import('./media.js');
+      const r = await media.transcribe(new Blob(chunks, { type: rec.mimeType || 'audio/mp4' }), { language: String(locale || 'en').split('-')[0] });
+      events.emit('listen.final', { text: (r.text || '').replace(/^\s*\[[^\]]*\]\s*$/, '').trim() });   // "[BLANK_AUDIO]" means nothing was said
+    } catch (e) { events.emit('listen.error', { message: 'Voice typing failed: ' + e.message }); events.emit('listen.final', { text: '' }); }
+    events.emit('listen.end', {});
+  };
+  const tick = setInterval(() => {
+    an.getFloatTimeDomainData(buf);
+    let s = 0; for (const v of buf) s += v * v;
+    const level = Math.min(1, Math.sqrt(s / buf.length) * 8);
+    events.emit('listen.level', { level });
+    const now = Date.now();
+    if (level > 0.06) { spoke = true; quietSince = 0; } else if (spoke) { quietSince ||= now; if (now - quietSince > 1300) finish(true); }
+    if (now - started > 20000) finish(true);                 // at most 20 seconds
+    if (!spoke && now - started > 8000) finish(false);       // nothing said
+  }, 100);
+  rec.start(250);
+  voiceState.rec = { stop: () => finish(true) };            // tapping the mic again (or letting go) sends what was said
+  events.emit('listen.started', { mode, engine: 'whisper' });
+  return true;
+}
+
 export async function info() {
   if (cachedInfo) return cachedInfo;
   try { cachedInfo = await call('app.info'); } catch { cachedInfo = await browser['app.info'](); }
@@ -49,7 +91,7 @@ const browser = {
       origin: location.origin,
       capabilities: {
         voiceOut: 'speechSynthesis' in window,
-        voiceIn: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+        voiceIn: !!(window.SpeechRecognition || window.webkitSpeechRecognition) || (!!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined'),   // MediaRecorder: offline voice typing (Whisper)
         voiceInOffline: false, wake: false, apps: /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1), files: false, system: false,
         commands: false, hotkey: false, status: false, ollamaControl: false, documents: false, shortcuts: false,
       },
@@ -118,12 +160,19 @@ const browser = {
   },
   'listen.start': async ({ locale = 'en-US', mode = 'command', offlineOnly = true }) => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) throw new Error('Voice input isn’t available in this browser. Try Chrome or Edge, or type instead.');
     if (mode === 'wake') throw new Error('The wake word needs the JARVIS desktop app.');
     // Prefer on-device recognition (newer Chrome/Edge). Never fall back to the browser's
-    // online speech service unless the user turned "Offline only" off.
-    const local = (await onDeviceSpeech(locale, true)) === 'available';
-    if (!local && offlineOnly) throw new Error('This browser can’t recognise speech offline. To use its online speech service, turn off “Offline only” in Settings → Voice (your voice is then processed by the browser maker). The desktop app recognises speech on your computer.');
+    // online speech service unless the user turned "Offline only" off (and it's online).
+    const local = SR ? (await onDeviceSpeech(locale, true)) === 'available' : false;
+    if (!local && (!SR || offlineOnly || navigator.onLine === false)) {
+      // Offline voice typing: Whisper on this device, if it has been saved (Settings → Use offline).
+      const media = await import('./media.js');
+      if (await media.whisperDownloaded()) return whisperListen({ locale, mode });
+      if (!SR) throw new Error('Voice input isn’t available in this browser. Save offline voice typing in Settings → Use offline (80 MB), or type instead.');
+      throw new Error(navigator.onLine === false
+        ? 'With no internet this browser can’t understand speech. Save offline voice typing in Settings → Use offline (80 MB, once), or type instead.'
+        : 'This browser can’t recognise speech offline. Save offline voice typing in Settings → Use offline (80 MB, once), or turn off “Offline only” in Settings → Voice to use the browser’s online speech service.');
+    }
     const rec = new SR();
     voiceState.rec = rec;
     if (local) { try { rec.processLocally = true; } catch {} try { if ('mode' in rec) rec.mode = 'ondevice-only'; } catch {} }

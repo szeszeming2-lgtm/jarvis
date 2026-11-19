@@ -90,6 +90,7 @@ export const FEATURES = [
     ['Voice recognition (who is speaking), kept separate from the spoken passphrase (what is said); never enough on its own', 'all', 'one-time ~105 MB download; microphone'],
     ['Extra check (PIN, code, optionally voice) before backups, restores, deleting, resetting, exporting and turning security off', 'all', ''],
     ['Local-only mode: nothing goes to the internet', 'all', ''],
+    ['Use offline: a checklist and one button that saves JARVIS, the AI and offline voice typing (Whisper) on the phone', 'all', 'one-time downloads; on iPhone, use the Home Screen app'],
     ['Light and dark themes, colours, backgrounds, text size, high contrast, compact and lightweight modes', 'all', ''],
   ]],
 ];
