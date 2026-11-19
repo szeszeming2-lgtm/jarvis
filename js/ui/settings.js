@@ -1,5 +1,6 @@
 // Settings tabs: General, Voice, Appearance, Home Screen, Shortcuts, Permissions, Privacy, About.
 import { h, iconNode, bus, fmtBytes, timeAgo } from '../util.js';
+import { securitySection } from './security.js';
 import { settings, set, DEFAULTS, getActivity, clearActivity, write, saveSettingsNow } from '../store.js';
 import { registerTab, refresh, closeSheet } from './sheets.js';
 import { row, rows, toggle, select, seg, range, text, area, section, callout, toast, dialog, prettyKey, comboFromEvent, isMac } from './common.js';
@@ -286,7 +287,7 @@ registerTab('privacy', (body) => {
   const countText = h('span', { text: `${sessions.state.index.length} conversations · ${memory.all().length} memories · ${skills.all().length} skills` });
   body.append(
     callout('<b>Private by design.</b> No accounts, no ads, no tracking, no analytics. Conversations, memories and settings are stored only on this device. The AI runs on your own device. JARVIS only uses the internet for things you ask for (weather, news, research, model downloads, sync), and local-only mode switches all of those off.', { icon: 'lock' }),
-    lockSection(),
+    securitySection(),
     section('Local-only mode', 'No internet at all: weather, news, research, page reading, sync and downloads are switched off. Everything else keeps working offline.', rows(
       row('Local-only mode', settings.privacy?.localOnly ? 'On: JARVIS doesn’t use the internet.' : 'Off', toggle(!!settings.privacy?.localOnly, async (v) => { set('privacy.localOnly', v); const ls = await import('../livesync.js'); ls.connect().catch(() => {}); /* pauses sync when on, reconnects when off */ toast(v ? 'Local-only mode on' : 'Local-only mode off'); }, 'Local-only mode')),
       row('Private chats', 'Chats that are never saved or remembered. Say “private chat”, or use the button under New conversation.', h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { closeSheet(); import('../assistant.js').then((a) => a.send('private chat')); } }, iconNode('lock'), 'Start a private chat')))),
@@ -297,14 +298,15 @@ registerTab('privacy', (body) => {
       row('Restore a backup', 'Adds everything from a backup file. Nothing on this device is deleted.', h('button', { class: 'btn btn-sm', type: 'button', onclick: importAll }, iconNode('upload'), 'Restore')),
     )),
     section('Delete', 'These cannot be undone.', rows(
-      row('Delete all conversations', '', h('button', { class: 'btn btn-sm btn-danger', type: 'button', text: 'Delete conversations', onclick: async () => { if (await dialog({ title: 'Delete all conversations?', text: 'Every conversation on this device will be permanently deleted.', okLabel: 'Delete', danger: true })) { await sessions.removeAll(); toast('Conversations deleted'); refresh(); } } })),
-      row('Delete all memories', '', h('button', { class: 'btn btn-sm btn-danger', type: 'button', text: 'Delete memories', onclick: async () => { if (await dialog({ title: 'Delete all memories?', text: 'JARVIS will forget everything it remembers about you.', okLabel: 'Delete', danger: true })) { await memory.clear(); toast('Memories deleted'); refresh(); } } })),
+      row('Delete all conversations', '', h('button', { class: 'btn btn-sm btn-danger', type: 'button', text: 'Delete conversations', onclick: async () => { if (!(await (await import('./security.js')).verify('Delete all conversations'))) return; if (await dialog({ title: 'Delete all conversations?', text: 'Every conversation on this device will be permanently deleted.', okLabel: 'Delete', danger: true })) { await sessions.removeAll(); toast('Conversations deleted'); refresh(); } } })),
+      row('Delete all memories', '', h('button', { class: 'btn btn-sm btn-danger', type: 'button', text: 'Delete memories', onclick: async () => { if (!(await (await import('./security.js')).verify('Delete all memories'))) return; if (await dialog({ title: 'Delete all memories?', text: 'JARVIS will forget everything it remembers about you.', okLabel: 'Delete', danger: true })) { await memory.clear(); toast('Memories deleted'); refresh(); } } })),
       row('Reset everything', 'Deletes all data and settings and restarts setup.', h('button', { class: 'btn btn-sm btn-danger', type: 'button', text: 'Reset JARVIS', onclick: resetAll })),
     )),
   );
 });
 
 async function exportAll() {
+  if (!(await (await import('./security.js')).verify('Back up all your data'))) return;
   // Everything: chats, memories, plugins, lists, people, reminders, workouts, projects, planner and settings.
   const { collect } = await import('../sync.js');
   const data = { app: 'JARVIS', version: 2, exported: new Date().toISOString(), bundle: await collect({ chats: 100000 }) };
@@ -318,6 +320,7 @@ async function importAll() {
     if (!f) return;
     const data = JSON.parse(f.text);
     if (data.app !== 'JARVIS') throw new Error('That is not a JARVIS backup file.');
+    if (!(await (await import('./security.js')).verify('Restore a backup into this profile'))) return;
     if (data.version === 2 && data.bundle) {
       const sync = await import('../sync.js');
       if (!(await dialog({ title: 'Restore this backup?', text: `From ${new Date(data.exported).toLocaleString()}. It adds everything that isn’t on this device yet and updates your settings. Nothing here is deleted.`, okLabel: 'Restore' }))) return;
@@ -342,6 +345,7 @@ async function importAll() {
 }
 
 async function resetAll() {
+  if (!(await (await import('./security.js')).verify('Reset JARVIS'))) return;
   if (!(await dialog({ title: 'Reset JARVIS?', text: 'All conversations, memories, skills and settings on this device will be deleted. Your AI models are kept.', okLabel: 'Reset everything', danger: true }))) return;
   await sessions.removeAll();
   await memory.clear();
@@ -350,33 +354,6 @@ async function resetAll() {
   Object.assign(settings, structuredClone(DEFAULTS));
   await saveSettingsNow();
   location.reload();
-}
-
-/** App lock: PIN (+ optional spoken passphrase), encryption at rest, auto-lock. */
-function lockSection() {
-  const box = h('div');
-  const draw = async () => {
-    const L = await import('../lock.js');
-    const c = await L.config();
-    if (!c.on) {
-      box.replaceChildren(rows(row('App lock', 'Off. Turn it on to protect JARVIS with a PIN and encrypt your chats, memories, lists, people, projects and notes on this device.', h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: async () => {
-        const pin = await dialog({ title: 'Choose a PIN', text: '4 to 12 digits. If you forget it, your encrypted data can’t be recovered (keep a backup).', input: '', okLabel: 'Next' });
-        if (!pin) return;
-        const again = await dialog({ title: 'Type the PIN again', input: '', okLabel: 'Next' });
-        if (again !== pin) return toast('The PINs didn’t match.', { bad: true });
-        const phrase = await dialog({ title: 'Spoken passphrase (optional)', text: 'A short secret sentence you can say instead of typing the PIN, like “blue rocket over the lake”. It’s a password you say, not a voiceprint, so say it where nobody can hear. Leave empty to skip.', input: '', okLabel: 'Turn on the lock' });
-        try { toast('Encrypting your data…', { ms: 2500 }); await L.enable(pin, { phrase: phrase || '', minutes: 10 }); toast('App lock is on. Your data is encrypted.'); draw(); } catch (e) { toast(e.message, { bad: true }); }
-      } }, iconNode('lock'), 'Turn on'))));
-      return;
-    }
-    box.replaceChildren(rows(
-      row('App lock', `On. Data encrypted on this device.${c.voiceWrap ? ' Spoken passphrase set.' : ''}`, h('div', { class: 'flex' },
-        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { closeSheet(); L.lockNow(); } }, iconNode('lock'), 'Lock now'),
-        h('button', { class: 'btn btn-sm btn-ghost danger', type: 'button', text: 'Turn off', onclick: async () => { if (!(await dialog({ title: 'Turn off the app lock?', text: 'Your data is saved without encryption again.', okLabel: 'Turn off', danger: true }))) return; try { await L.disable(); toast('App lock is off'); draw(); } catch (e) { toast(e.message, { bad: true }); } } }))),
-      row('Lock after', 'Minutes without using JARVIS (0 = only when you lock it).', select(String(c.minutes ?? 10), [['0', 'Never'], ['2', '2 minutes'], ['5', '5 minutes'], ['10', '10 minutes'], ['30', '30 minutes'], ['60', '1 hour']], async (v) => { await L.setMinutes(v); toast('Saved'); }, 'Lock after'))));
-  };
-  draw();
-  return section('App lock', 'Protect JARVIS on a shared device. Reminders still go off while it’s locked.', box);
 }
 
 // ------------------------------------------------------------------ About

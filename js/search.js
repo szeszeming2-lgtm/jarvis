@@ -12,7 +12,7 @@ import * as links from './links.js';
 import { describeWhen } from './when.js';
 
 export const SETTINGS_PAGES = [
-  ['general', 'General settings', 'name, number, home address, briefing, link devices'], ['models', 'AI models', 'download, choose model, ollama'], ['voice', 'Voice', 'speak, voice, wake word, microphone, push to talk'],
+  ['general', 'General settings', 'name, number, home address, briefing, link devices'], ['profiles', 'Profiles', 'users, people, family, switch, account, picture'], ['companion', 'iPhone & Mac', 'phone, remote, siri, shortcuts, pair, status'], ['models', 'AI models', 'download, choose model, ollama'], ['voice', 'Voice', 'speak, voice, wake word, microphone, push to talk'],
   ['plugins', 'Plugins', 'plugin store, add plugin'], ['workout', 'Workouts', 'exercise, reps, coach'], ['lists', 'Lists & People', 'shopping, to-do, contacts'],
   ['sync', 'Link devices', 'sync, sign in, iPad, iPhone'], ['projects', 'Projects', 'tasks, notes, documents, knowledge map'], ['planner', 'Planner', 'habits, goals, budget, stopwatch, voice notes'],
   ['memory', 'Memory', 'remember, forget'], ['links', 'Saved links', 'bookmarks, read later, reading list'], ['appearance', 'Appearance', 'theme, colors, dark, light, animations'], ['home', 'Home screen', 'dashboard, widgets, cards'],

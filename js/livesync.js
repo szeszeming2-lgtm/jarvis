@@ -121,8 +121,24 @@ function joinHub(Peer, room) {
   });
 }
 
+// ---------------------------------------------------------------- messages (companion)
+// Besides data bundles, linked devices can send small messages (status, commands, approvals,
+// notifications), encrypted with the same phrase key. The hub passes them on to the others.
+const msgHandlers = new Set(), openHandlers = new Set();
+export const onMessage = (fn) => { msgHandlers.add(fn); return () => msgHandlers.delete(fn); };
+export const onOpen = (fn) => { openHandlers.add(fn); return () => openHandlers.delete(fn); };
+export const connected = () => [...conns].some((c) => c.open);
+/** Send a message to every linked device (or one connection). → how many it went to. */
+export async function sendMessage(obj, only = null) {
+  if (!settings.syncPhrase) return 0;
+  const data = await sealLive(obj, settings.syncPhrase);
+  let n = 0;
+  for (const c of conns) if ((!only || c === only) && c.open) { try { c.send({ t: 'msg', data }); n++; } catch {} }
+  return n;
+}
+
 function setup(c) {
-  c.on('open', () => { conns.add(c); state.peers = conns.size; state.status = 'connected'; emit(); sendTo(c, true); });
+  c.on('open', () => { conns.add(c); state.peers = conns.size; state.status = 'connected'; emit(); sendTo(c, true); for (const fn of openHandlers) try { fn(c); } catch {} });
   c.on('data', (d) => receive(c, d).catch((e) => { state.error = e.message; emit(); }));
   const gone = () => {
     conns.delete(c); state.peers = conns.size;
@@ -154,6 +170,13 @@ export function push(except = null) {
 }
 
 async function receive(c, msg) {
+  if (msg?.t === 'msg') {
+    let m;
+    try { m = await openLive(msg.data, settings.syncPhrase); } catch { return; }   // not from our devices: ignored
+    if (state.role === 'hub') for (const o of conns) if (o !== c && o.open) try { o.send(msg); } catch {}   // pass it on
+    for (const fn of msgHandlers) try { fn(m, c); } catch (e) { console.error(e); }
+    return;
+  }
   if (msg?.t !== 'bundle') return;
   let data;
   try { data = await openLive(msg.data, settings.syncPhrase); }

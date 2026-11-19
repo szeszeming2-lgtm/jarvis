@@ -80,6 +80,7 @@ function build(question, resolve) {
       hasCam ? big('camera', 'Camera', 'Point at something', () => useSource('camera')) : null,
       big('image', mobile() ? 'Photos' : 'A picture', mobile() ? 'Pick from your photos' : 'Choose a file, or paste one (⌘V)', () => fileInput(false)),
       canScreen ? big('display', 'My screen', isNative ? 'Circle anything on your screen' : 'Share your screen, then circle', () => useSource('screen')) : null,
+      canScreen ? big('rec', 'Live screen', 'Screen Vision: draw, ask, record', () => { close(null); import('./screenvision.js').then((m) => m.start()); }) : null,
       can('screenPick') ? big('pointer', 'Click on screen', 'Quick: click one thing', () => { close({ pick: true }); }) : null));
   }
 

@@ -1,6 +1,7 @@
 // Abilities JARVIS can use, with transparent permission levels.
 // allow = runs right away, ask = shows a confirmation card first, off = never runs.
 import { call, can, isNative } from './host.js';
+import { redact } from './auth.js';
 import { settings, set, logActivity } from './store.js';
 import { calculate } from './calc.js';
 import * as memory from './memory.js';
@@ -609,7 +610,8 @@ export function summary(name, res, args) {
 }
 
 const humanName = (n) => n.replace(/_/g, ' ');
-const brief = (a) => truncate(JSON.stringify(a), 160);
+// The activity log never keeps secrets (PINs, codes, passwords, keys): those fields are hidden.
+const brief = (a) => truncate(JSON.stringify(redact(a)), 160);
 
 export function normalizeUrl(u) {
   u = String(u || '').trim();

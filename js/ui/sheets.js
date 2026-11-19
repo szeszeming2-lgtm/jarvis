@@ -3,6 +3,8 @@ import { h, $, iconNode, hydrateIcons, bus } from '../util.js';
 
 const TABS = [
   ['general', 'General', 'user'],
+  ['profiles', 'Profiles', 'user'],
+  ['companion', 'iPhone & Mac', 'phone'],
   ['command', 'Command Center', 'display'],
   ['mission', 'Mission Control', 'zap'],
   ['models', 'AI Models', 'layers'],
@@ -14,6 +16,7 @@ const TABS = [
   ['lists', 'Lists & People', 'list'],
   ['links', 'Saved links', 'globe'],
   ['translate', 'Live translator', 'language'],
+  ['recordings', 'Screen recordings', 'display'],
   ['sync', 'Link devices', 'refresh'],
   ['memory', 'Memory', 'brain'],
   ['skills', 'Skills', 'puzzle'],

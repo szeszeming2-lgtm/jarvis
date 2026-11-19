@@ -2,7 +2,7 @@
 // Recordings are kept in the browser's database (IndexedDB), not the small settings store.
 // Speech-to-text: Whisper base (MIT licence) through transformers.js, ~77 MB, downloaded
 // once after the user agrees. It understands ~100 languages and can translate to English.
-import { read, write, settings } from './store.js';
+import { read, write, settings, sealBytes, unsealBytes, mediaDbName } from './store.js';
 import { call, isNative } from './host.js';
 import { bus, uid } from './util.js';
 import { library } from './vision.js';
@@ -13,16 +13,25 @@ export const WHISPER_MB = 80;
 // ---------------------------------------------------------------- blob store
 function db() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('jarvis-media', 1);
+    const r = indexedDB.open(mediaDbName(), 1);
     r.onupgradeneeded = () => r.result.createObjectStore('blobs');
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   });
 }
 async function tx(mode, fn) { const d = await db(); return new Promise((res, rej) => { const t = d.transaction('blobs', mode); const out = fn(t.objectStore('blobs')); t.oncomplete = () => res(out?.result); t.onerror = () => rej(t.error); }); }
-export const putBlob = (id, blob) => tx('readwrite', (s) => s.put(blob, id));
-export const getBlob = (id) => tx('readonly', (s) => s.get(id));
+export const putBlob = async (id, blob) => { const v = await sealBytes(blob); return tx('readwrite', (s) => s.put(v, id)); };
+export const getBlob = async (id) => unsealBytes(await tx('readonly', (s) => s.get(id)));
 export const delBlob = (id) => tx('readwrite', (s) => s.delete(id));
+/** App lock turned on/off: re-save every recording encrypted (or plain). */
+export async function rewriteBlobs(encrypt) {
+  const keys = await tx('readonly', (s) => s.getAllKeys()).catch(() => []);
+  for (const k of keys || []) {
+    const v = await tx('readonly', (s) => s.get(k));
+    if (encrypt && v && !v.jenc) { const sealed = await sealBytes(v); await tx('readwrite', (s) => s.put(sealed, k)); }
+    if (!encrypt && v?.jenc) { const plain = await unsealBytes(v); await tx('readwrite', (s) => s.put(plain, k)); }
+  }
+}
 
 // ---------------------------------------------------------------- voice notes
 let notes = [];

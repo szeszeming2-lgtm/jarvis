@@ -109,6 +109,14 @@ export function match(raw, { customSkills = [] } = {}) {
   if (/^(?:record|start recording) (?:a |the |this |my )?meeting$|^(?:take )?meeting notes$/.test(low)) return { local: 'open', tab: 'planner', say: 'Tap “Record a voice note” under Voice notes & meetings (ask everyone first). When it’s done: “Turn into text”, then “Meeting notes”.' };
   if (/^(?:suggest (?:some )?automations?|what (?:should|could|can) i automate\??|automation (?:ideas|suggestions))$/.test(low)) return { local: 'open', tab: 'planner', say: 'Here are your automations. Suggestions based on what you do often are under them (they appear once you’ve done something at the same time on 3 different days).' };
   if (/^(?:(?:open |start |go |enter |show )?(?:the )?(?:full ?screen|voice (?:mode|view|screen))(?: mode| view)?|full ?screen (?:voice|mode))$/.test(low)) return { local: 'fullscreen' };
+  // Screen Vision: share a screen, draw on it, ask about it
+  if (/^(?:start |open |turn on |use )?(?:screen vision|live screen|screen vision mode)(?: mode)?$|^(?:watch|look at|share|show you) my screen(?: live)?$|^(?:start )?record(?:ing)? my screen$|^(?:start )?(?:a )?screen recording$/.test(low)) return { local: 'screenvision' };
+  if (/^(?:show |open )?(?:my )?(?:screen recordings|recording history|saved recordings)$/.test(low)) return { local: 'open', tab: 'recordings', say: 'Here are your screen recordings.' };
+  // Profiles
+  if (/^(?:switch|change) (?:the )?(?:profiles?|users?|accounts?)$|^(?:who(?:'s| is) using (?:jarvis|this)|switch user)$/.test(low)) return { local: 'profiles', action: 'pick' };
+  if ((r = low.match(/^(?:switch|change|go) to (.{1,30}?)(?:['’]s)? (?:profile|account)$/))) return { local: 'profiles', action: 'switch', name: r[1] };
+  if (/^(?:who am i|which profile(?: is this| am i(?: using| on)?)?|what(?:'s| is) my profile)$/.test(low)) return { local: 'profiles', action: 'who' };
+  if (/^(?:new|add|create) (?:a )?(?:profile|user)$/.test(low)) return { local: 'open', tab: 'profiles', say: 'Here are the profiles. Tap “New profile”.' };
   // Compact layout (before AI modes, so "turn off compact mode" isn't read as leaving an AI mode)
   if ((r = low.match(/^(?:(turn on|switch to|use|enable|start|go)|(turn off|exit|leave|disable|stop|end))? ?(?:the )?compact (?:mode|view|layout)(?: (on|off))?$/))) return { local: 'compact', on: !(r[2] || r[3] === 'off') };
   // AI modes: "study mode", "switch to developer mode", "translator mode to French", "normal mode", "exit study mode"

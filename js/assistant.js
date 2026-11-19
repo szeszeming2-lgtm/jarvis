@@ -45,6 +45,8 @@ export function stop() {
 }
 
 function confirm(payload) {
+  // A command sent from your phone: the approval is asked on the phone, where you are.
+  if (run.remoteConfirm) return run.remoteConfirm(payload);
   return new Promise((resolve) => {
     run.confirmResolvers.add(resolve);
     bus.emit('state', 'waiting');
@@ -158,6 +160,21 @@ export async function send(text, { viaVoice = false, attachment = null, images =
     if (intent.what !== 'last') { push({ role: 'user', content: text, voice: viaVoice || undefined }); push({ role: 'assistant', content: `🔊 Reading ${intent.what === 'clipboard' ? 'your clipboard' : 'it'} aloud${say.length > 4000 ? ' (the first part)' : ''}. Press Esc to stop.`, instant: true }); }
     voiceMod.stopSpeaking();
     voiceMod.speak(say.slice(0, 4000));
+    return;
+  }
+  if (intent?.local === 'screenvision') { (await import('./ui/screenvision.js')).start(); return; }
+  if (intent?.local === 'profiles') {
+    const P = await import('./profiles.js');
+    push({ role: 'user', content: text, voice: viaVoice || undefined });
+    if (intent.action === 'who') { push({ role: 'assistant', content: `You’re using **${P.active()?.name}**’s profile${P.all().length > 1 ? ` (${P.all().length} profiles on this device)` : ''}.`, instant: true }); return; }
+    if (intent.action === 'switch') {
+      const p = P.all().find((x) => x.name.toLowerCase() === intent.name.toLowerCase());
+      if (!p) { push({ role: 'assistant', content: `There’s no profile called “${intent.name}”. Profiles: ${P.all().map((x) => x.name).join(', ')}.`, instant: true, buttons: [{ label: 'Profiles', open: 'profiles' }] }); return; }
+      push({ role: 'assistant', content: `Switching to ${p.name}…`, instant: true });
+      await P.switchTo(p.id);
+      return;
+    }
+    (await import('./ui/profiles.js')).pickProfile({ reason: 'switch' });
     return;
   }
   if (intent?.local === 'fullscreen') { (await import('./ui/voicefull.js')).open({ manual: true }); return; }

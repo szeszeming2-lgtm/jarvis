@@ -23,6 +23,9 @@ import './ui/links.js';
 import './ui/missions.js';
 import './ui/command.js';
 import './ui/translate.js';
+import { initProfileButton } from './ui/profiles.js';
+import './ui/companion.js';
+import './ui/recordings.js';
 import * as projects from './projects.js';
 import * as workout from './workout.js';
 import { shareApp } from './ui/share.js';
@@ -56,7 +59,16 @@ async function boot() {
   window.__deviceRam = hi.ramGB || 8;
   document.documentElement.classList.toggle('native', isNative);
   if (hi.titlebar) document.documentElement.style.setProperty('--titlebar', hi.titlebar + 'px');
-  // App lock: nothing private is read until the right PIN or passphrase is given.
+  // Profiles: choose whose data to open before anything is read.
+  const profilesMod = await import('./profiles.js');
+  await profilesMod.init();
+  let pickedThisTab = null;
+  try { pickedThisTab = sessionStorage.getItem('jarvis-picked'); } catch {}
+  if (profilesMod.askAtStart() && !pickedThisTab) {
+    await (await import('./ui/profiles.js')).pickProfile({ reason: 'start' });
+    try { sessionStorage.setItem('jarvis-picked', profilesMod.activeId()); } catch {}
+  }
+  // App lock: nothing private is read until the right PIN (and code) is given.
   const lockMod = await import('./lock.js');
   if ((await lockMod.config()).on) await lockMod.showLock({ firstStart: true });
   await loadSettings();
@@ -75,6 +87,27 @@ async function boot() {
   }).catch(console.error);
   // Signed in with a secret phrase? Keep this device in step with the others.
   import('./livesync.js').then((ls) => ls.start()).catch(console.error);
+  // iPhone companion over the same encrypted link: status, commands, approvals, notifications.
+  import('./companion.js').then(async (C) => {
+    await C.start();
+    // Computer: a phone asks to send commands → allow it here (matching code + your PIN).
+    bus.on('companion.pair', async (d) => {
+      if (app.pairAsking) return; app.pairAsking = true;
+      try {
+        const ok = await dialog({ title: `Allow your ${d.name} to control this computer?`, text: `Only if the code ${d.code} is also on your ${d.name}. It can then send commands to JARVIS here; anything that needs an OK is asked on the ${d.name}, and sensitive actions need this profile’s PIN.`, okLabel: 'Allow', cancelLabel: 'Don’t allow' });
+        if (ok && (await (await import('./ui/security.js')).verify(`Allow your ${d.name}`))) { await C.approve(d); toast(`Your ${d.name} can now send commands. Send the command again.`); }
+      } finally { app.pairAsking = false; }
+    });
+    // Phone: the computer needs your OK for something → show it right away.
+    bus.on('companion.confirm', async (c) => {
+      const { confirmCard } = await import('./ui/companion.js');
+      const layer = h('div', { class: 'sheet-layer', style: { zIndex: 86 } });
+      const close = () => layer.remove();
+      layer.append(h('div', { style: { width: 'min(460px, 100%)' } }, h('div', { class: 'muted small', style: { margin: '0 0 6px 4px' }, text: 'Your computer asks:' }), confirmCard(c, close)));
+      document.body.append(layer);
+      setTimeout(close, 120000);
+    });
+  }).catch(console.error);
   sessions.create();
 
   app.viz = new Visualizer($('#visualizer'));
@@ -99,6 +132,14 @@ async function boot() {
   bus.on('wizard.open', openWizard);
   bus.on('look.start', (d) => look.start(d));
   lockMod.startAutoLock();
+  initProfileButton();
+  // A new profile asked for a PIN when it was created: offer it now.
+  import('./store.js').then(async (S) => {
+    const ob = await S.read('onboard', null);
+    if (!ob?.askPin) return;
+    await S.write('onboard', {});
+    if (!lockMod.isOn()) (await import('./ui/security.js')).offerPin();
+  }).catch(console.error);
   // Mac app: floating orb, always-on-top, clipboard history (memory only) as set last time.
   if (can('orb')) call('app.setWindowOptions', { orb: !!settings.appearance.orb, onTop: !!settings.appearance.onTop }).catch(() => {});
   if (can('clipboardHistory') && settings.clipboardHistory) call('clipboard.setHistory', { on: true }).catch(() => {});
@@ -122,7 +163,12 @@ async function boot() {
   const notify = await import('./notify.js');
   await notify.load();
   notify.setFocusCheck(() => planner.focusState().running);
-  app.notify = (title, body, opts = {}) => notify.notify(title, body, { ...opts, show: (n) => toast(n.body ? `${n.title} ${n.body}` : n.title, { icon: n.icon, ms: n.priority === 'high' ? 15000 : 6000 }) });
+  app.notify = (title, body, opts = {}) => {
+    const r = notify.notify(title, body, { ...opts, show: (n) => toast(n.body ? `${n.title} ${n.body}` : n.title, { icon: n.icon, ms: n.priority === 'high' ? 15000 : 6000 }) });
+    // Also to a linked phone, for the kinds you chose (Settings → iPhone & Mac).
+    import('./companion.js').then(async (C) => { if ((await C.me()).kind === 'computer') C.notifyPhones(title, body, opts.kind || 'info'); }).catch(() => {});
+    return r;
+  };
   bus.on('reminder.due', (r) => {
     const text = r.missed ? `While I was closed, a reminder came due: ${r.text}.` : `Reminder: ${r.text}.`;
     app.notify(text, '', { priority: 'high', kind: 'reminder', icon: 'bell' });
@@ -163,6 +209,22 @@ async function boot() {
   document.title = settings.assistantName;
 
   bus.on('phoneai.fallback', () => toast('The graphics chip is busy right now, so the backup AI (on the processor) answered this time.', { icon: 'cpu', ms: 6000 }));
+  // Siri & Shortcuts links: #ask=<words> runs here; #mac=<words> is sent to the linked computer.
+  const runLink = async () => {
+    const m = location.hash.match(/^#(ask|mac)=(.+)$/);
+    if (!m) return;
+    const words = decodeURIComponent(m[2].replace(/\+/g, ' ')).trim().slice(0, 1000);
+    history.replaceState(null, '', location.pathname + location.search);
+    if (!words) return;
+    if (m[1] === 'ask') { assistant.send(words); return; }
+    const C = await import('./companion.js');
+    toast('Sending to your computer…', { icon: 'refresh' });
+    for (let i = 0; i < 30 && ![...C.state.devices.values()].some((d) => d.kind === 'computer'); i++) await new Promise((r) => setTimeout(r, 500));
+    try { const r = await C.sendCommand(words); assistant.announce(`**Your computer** (“${words}”):\n\n${r.text}`, { speak: settings.voice.speak !== 'never' }); }
+    catch (e) { assistant.announce(e.message); }
+  };
+  addEventListener('hashchange', runLink);
+  setTimeout(runLink, 1200);
   // Restarted because the phone took the graphics chip away? Ask the same question again.
   const askAgain = assistant.resendAfterRestart();
   ollama.detect().then(async () => {
