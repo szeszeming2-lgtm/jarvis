@@ -18,6 +18,7 @@ const P = {
   send: '<path d="M5 12h13M13 6l6 6-6 6"/>',
   stop: '<rect x="7" y="7" width="10" height="10" rx="2"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7M9 7V4.5h6V7"/>',
   edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',

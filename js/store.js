@@ -86,6 +86,7 @@ export const DEFAULTS = {
   customInstructions: '',
   replyLanguage: 'auto',
   instantCommands: true,
+  suggestNext: true,         // “Try saying” suggestions under each reply
   search: { meaning: false, meaningDownloaded: false },
   translator: { a: '', b: '', speak: true },
   autoSuggest: { dismissed: [] },
@@ -94,6 +95,7 @@ export const DEFAULTS = {
   ai: {
     provider: 'ollama',        // ollama (a computer) | phone (in this browser, WebLLM)
     byProvider: {},
+    phoneSaved: [],            // on-device models known to be saved here (shown even when offline)
     url: 'http://127.0.0.1:11434',
     model: '',
     temperature: 0.7,
@@ -115,6 +117,7 @@ export const DEFAULTS = {
     wake: false,
     wakeWord: 'jarvis',
     continuous: true,          // keep listening after a spoken reply (say “that’s all” to stop)
+    fullscreen: true,          // full-screen voice view while you talk
     bargeIn: false,            // say "stop" to interrupt (experimental)
     silenceMs: 1400,
   },

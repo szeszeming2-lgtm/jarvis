@@ -4,6 +4,7 @@
 // get a slower backup: transformers.js running small models on the processor (WASM).
 // Free, private, no account: the model downloads once, then works offline.
 import { bus } from './util.js';
+import { settings, set } from './store.js';
 import { library as tfLibrary } from './vision.js';
 
 export const LIB_URL = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.87/lib/index.js';
@@ -58,22 +59,51 @@ export function fullId(key) {
 export const keyOf = (id) => String(id || '').replace(/-q4f(16|32)_1-MLC$/, '');
 export const info = (keyOrId) => [...PHONE_MODELS, ...WASM_MODELS].find((m) => m.key === keyOf(keyOrId));
 
+// Offline: the engine library is kept in the same cache the offline helper (sw.js) reads from,
+// so it loads with no internet even if it was first fetched before offline support started.
+const LIB_CACHE = 'jarvis-lib-0.2.87';
+async function keepLibOffline() {
+  try { const c = await caches.open(LIB_CACHE); if (!(await c.match(LIB_URL))) await c.add(LIB_URL); } catch {}
+}
 async function lib() {
-  if (!state.lib) state.lib = await import(/* @vite-ignore */ LIB_URL);
+  if (!state.lib) {
+    try { state.lib = await (state.libLoader ? state.libLoader() : import(/* @vite-ignore */ LIB_URL)); }   // libLoader: tests only
+    catch (e) { throw Object.assign(new Error('OFFLINE_LIB'), { cause: e }); }
+    keepLibOffline();
+  }
   return state.lib;
+}
+/** Models saved on this device, remembered so they still show up when the check itself can't run (offline). */
+const remembered = () => (Array.isArray(settings.ai?.phoneSaved) ? settings.ai.phoneSaved : []);
+function remember(key, on = true) {
+  const list = new Set(remembered());
+  on ? list.add(key) : list.delete(key);
+  set('ai.phoneSaved', [...list]);
 }
 
 export async function isDownloaded(key) {
   if (isWasmKey(key)) {
     try { const c = await caches.open('transformers-cache'); return !!(await c.match(`https://huggingface.co/${info(key).repo}/resolve/main/onnx/model_quantized.onnx`)); } catch { return false; }
   }
-  try { await support(); const w = await lib(); return await w.hasModelInCache(fullId(key)); } catch { return false; }
+  await support();
+  const w = await lib();   // throws OFFLINE_LIB when the engine can't be loaded (no internet, not saved yet)
+  try { return await w.hasModelInCache(fullId(key)); } catch { return false; }
 }
 
 export async function downloadedKeys() {
   await support();
   const out = [];
-  for (const m of models()) if (await isDownloaded(m.key)) out.push(m.key);
+  try {
+    for (const m of models()) if (await isDownloaded(m.key)) out.push(m.key);
+  } catch (e) {
+    if (e.message !== 'OFFLINE_LIB') throw e;
+    // Offline before the engine was ever kept: trust what we saved earlier.
+    return remembered().filter((k) => models().some((m) => m.key === k));
+  }
+  // Keep the remembered list in step with what is really there.
+  const keep = models().map((m) => m.key);
+  const now = [...new Set([...remembered().filter((k) => !keep.includes(k)), ...out])];
+  if (now.join() !== remembered().join()) set('ai.phoneSaved', now);
   return out;
 }
 
@@ -149,6 +179,7 @@ export async function load(key, onProgress) {
     if (isWasmKey(key)) {
       await loadWasm(key, report);
       state.loadedId = key;
+      remember(key);
       try { await navigator.storage?.persist?.(); } catch {}
       return state.wasm;
     }
@@ -156,6 +187,8 @@ export async function load(key, onProgress) {
     if (state.engine) { state.engine.setInitProgressCallback?.(report); await state.engine.reload(id); }
     else state.engine = await w.CreateMLCEngine(id, { initProgressCallback: report });
     state.loadedId = id;
+    remember(key);
+    keepLibOffline();
     try { await navigator.storage?.persist?.(); } catch {}
     return state.engine;
   })();
@@ -176,6 +209,8 @@ function explain(e) {
   const m = String(e?.message || e);
   if (/QuotaExceeded|quota|storage/i.test(m)) return 'There isn’t enough free storage on this device for that model. Free some space or pick a smaller one.';
   if (/device lost|out of memory|OOM|allocate|buffer size/i.test(m)) return 'This model is too big for this device’s memory. Pick a smaller one (Tiny or Small).';
+  if (/OFFLINE_LIB/.test(m)) return 'You’re offline, and the AI engine isn’t saved on this device yet. Connect to the internet once and open JARVIS; after that it works offline.';
+  if (/Failed to fetch|NetworkError|Load failed|network connection was lost|offline/i.test(m) && typeof navigator !== 'undefined' && navigator.onLine === false) return 'You’re offline and this model isn’t fully saved on this device. Connect once to finish the download; then it works offline.';
   if (/network|fetch|Failed to fetch|NetworkError/i.test(m)) return 'The download was interrupted. Check your internet connection and try again — it continues where it stopped.';
   if (DROPPED.test(m)) return 'The phone took the AI out of memory (this happens when the browser was in the background). Tap Try again and it loads again.';
   return m;
@@ -257,6 +292,7 @@ export async function unload() {
 
 export async function remove(key) {
   if (state.loadedId === fullId(key)) await unload();
+  remember(key, false);
   if (isWasmKey(key)) {
     const c = await caches.open('transformers-cache');
     for (const req of await c.keys()) if (req.url.includes(`/${info(key).repo}/`)) await c.delete(req);

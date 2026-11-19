@@ -160,6 +160,7 @@ export async function send(text, { viaVoice = false, attachment = null, images =
     voiceMod.speak(say.slice(0, 4000));
     return;
   }
+  if (intent?.local === 'fullscreen') { (await import('./ui/voicefull.js')).open({ manual: true }); return; }
   if (intent?.local === 'compact') {
     setSetting('appearance.compact', !!intent.on);
     (await import('./ui/theme.js')).applyAppearance();

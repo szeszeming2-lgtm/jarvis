@@ -9,6 +9,8 @@ import { call, isNative } from '../host.js';
 import { toast } from './common.js';
 import { openSheet } from './sheets.js';
 import * as ollama from '../ollama.js';
+import { nextSuggestions } from '../suggest.js';
+import { getActivity } from '../store.js';
 
 const nodes = new Map();
 let thread;
@@ -25,6 +27,37 @@ export function init() {
   bus.on('msg.update', (m) => { refresh(m); markLast(); scrollDown(); });
   bus.on('msg.stream', (m) => schedule(m));
   assistant.setConfirmUI(confirmCard);
+  // "Try saying": what you could say next, under the latest reply.
+  getActivity().then((log) => { for (const e of log) if (e.result === 'ok' && e.tool) usedFeatures.add(e.tool); }).catch(() => {});
+  bus.on('activity', (e) => { if (e?.tool) usedFeatures.add(e.tool); });
+  for (const ev of ['msg.add', 'msg.update', 'turn.done', 'busy', 'session']) bus.on(ev, queueNext);
+  bus.on('settings', (d) => { if (d?.path === 'suggestNext') queueNext(); });
+}
+
+// ---------------------------------------------------------------- "Try saying"
+const usedFeatures = new Set();
+let nextTimer = 0;
+function queueNext() { clearTimeout(nextTimer); thread?.querySelector('.next-say')?.remove(); nextTimer = setTimeout(drawNext, 300); }
+/** The current suggestions (also used by the full-screen voice view). */
+export function currentSuggestions() {
+  const msgs = sessions.state.current?.messages || [];
+  const last = msgs[msgs.length - 1];
+  if (settings.suggestNext === false || assistant.run.busy || !last || last.role === 'user' || last.pending || last.streaming) return [];
+  for (const m of msgs) if (m.role === 'user') { const t = String(m.content || '').toLowerCase(); if (/^make (slides|a presentation)/.test(t)) usedFeatures.add('create'); if (/translat/.test(t)) usedFeatures.add('translate'); if (/^(fact check|research)/.test(t)) usedFeatures.add('research'); if (/flash ?cards/.test(t)) usedFeatures.add('cards'); if (/command cent/.test(t)) usedFeatures.add('command'); }
+  return nextSuggestions(msgs, { where: isNative ? 'mac' : 'web', used: usedFeatures, seed: msgs.length, mode: settings.mode || 'assistant' });
+}
+export function useSuggestion(s) {
+  if (s.fill) { const i = $('#input'); i.value = s.text; i.focus(); i.setSelectionRange(i.value.length, i.value.length); i.dispatchEvent(new Event('input', { bubbles: true })); return; }
+  assistant.send(s.text);
+}
+function drawNext() {
+  thread?.querySelector('.next-say')?.remove();
+  const list = currentSuggestions();
+  if (!list.length) return;
+  thread.append(h('div', { class: 'next-say', role: 'group', 'aria-label': 'Things you could say next' },
+    h('span', { class: 'next-label', text: 'Try saying' }),
+    ...list.map((s) => h('button', { class: 'suggestion next-chip', type: 'button', title: s.text, text: s.fill ? s.text.trim() + ' …' : s.label, onclick: () => useSuggestion(s) }))));
+  scrollDown();
 }
 
 function updateMode() {

@@ -172,6 +172,11 @@ async function boot() {
   else if (!settings.setupDone) openWizard();
   else syncWake();
   addEventListener('hashchange', checkForCall);
+  // Offline: say so once, and show a small "offline" tag by the model name (the AI keeps working on the device).
+  const netNote = () => document.documentElement.classList.toggle('is-offline', navigator.onLine === false);
+  addEventListener('offline', () => { netNote(); toast(ollama.isPhone() || isNative ? 'You’re offline. JARVIS still works: chat, lists, reminders, notes and more. Weather, news and research need internet.' : 'You’re offline. Weather, news and research need internet.', { icon: 'wifi', ms: 7000 }); });
+  addEventListener('online', () => { netNote(); toast('Back online.', { icon: 'wifi' }); });
+  netNote();
   app.ready = true;
   bus.emit('ready');
   // Web version: cache the interface so it opens offline (never inside the desktop app).
@@ -549,6 +554,8 @@ function wireVoice() {
   });
   $('#orbHit').addEventListener('click', () => { if (voice.voice.speaking || assistant.run.busy) stopAll(); else toggleListen(); });
   app.toggleListen = toggleListen;
+  // Full-screen voice view: opens by itself when you talk; the ⤢ button opens it any time.
+  import('./ui/voicefull.js').then((vf) => { vf.init(); app.voiceFull = vf; $('#fullBtn').addEventListener('click', () => (vf.isOpen() ? vf.close() : vf.open({ manual: true }))); }).catch(console.error);
 
   bus.on('voice.level', (l) => app.viz.setLevel(l));
   bus.on('voice.word', () => app.viz.kick(0.55));

@@ -69,7 +69,7 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .selectable, .msg-body, textarea, input { user-select: text; -webkit-user-select: text; }
 
 /* Backdrop */
-.backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+.backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; /* the glows must not widen the page on phones */
   background:
     radial-gradient(1200px 700px at 50% 30%, rgba(var(--accent2-rgb), 0.10), transparent 60%),
     radial-gradient(900px 600px at 50% 110%, rgba(var(--accent-rgb), 0.07), transparent 60%),
@@ -816,3 +816,42 @@ html.bg-aurora .glow { width: 760px; height: 760px; opacity: .42; filter: blur(1
 html.bg-aurora .glow-a { animation-duration: 18s; }
 html.bg-circuit .grid-lines { background-image: linear-gradient(rgba(var(--accent-rgb), .07) 1px, transparent 1px), linear-gradient(90deg, rgba(var(--accent-rgb), .07) 1px, transparent 1px), radial-gradient(circle, rgba(var(--accent-rgb), .35) 1.5px, transparent 2px);
   background-size: 88px 88px, 88px 88px, 88px 88px; background-position: 0 0, 0 0, -1px -1px; }
+html.is-offline #modelChipText::after { content: ' · offline'; color: var(--text-dim); font-weight: 400; }
+/* "Try saying" suggestions under the latest reply */
+.next-say { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 6px 40px; animation: rise .35s var(--ease) both; }
+.next-say .next-label { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-dim); margin-right: 2px; }
+.next-say .next-chip { font-size: 13px; padding: 6px 12px; }
+@media (max-width: 640px) { .next-say { margin-left: 0; } .next-say .next-chip { font-size: 14px; padding: 8px 12px; } }
+/* Full-screen voice view */
+.voice-full { position: fixed; inset: 0; z-index: 66; display: flex; flex-direction: column; align-items: center;
+  padding: calc(env(safe-area-inset-top, 0px) + var(--titlebar, 0px) + 10px) 16px calc(env(safe-area-inset-bottom, 0px) + 18px);
+  background: radial-gradient(900px 700px at 50% 38%, rgba(var(--accent-rgb), .14), transparent 65%), linear-gradient(180deg, var(--bg1), var(--bg0));
+  animation: vfIn .35s var(--ease) both; overflow: hidden; }
+@keyframes vfIn { from { opacity: 0; transform: scale(1.03); } }
+.vf-top { width: 100%; max-width: 900px; display: flex; align-items: center; gap: 6px; }
+.vf-name { flex: 1; font-size: 12px; letter-spacing: .34em; text-transform: uppercase; color: var(--accent); text-shadow: 0 0 10px rgba(var(--accent-rgb), .5); }
+.vf-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; }
+.voice-full .orb-wrap { width: min(86vw, 58vh, 640px); }
+.voice-full .orb-status { margin-top: 2px; font-size: 13px; }
+.vf-captions { width: 100%; max-width: 760px; text-align: center; display: flex; flex-direction: column; gap: 10px; min-height: 96px; }
+.vf-you { color: var(--text-dim); font-size: 17px; line-height: 1.4; }
+.vf-you.live { color: var(--text); }
+.vf-me { color: var(--text); font-size: clamp(19px, 2.6vw, 26px); line-height: 1.4; font-weight: 500; max-height: 34vh; overflow-y: auto; }
+.vf-suggest { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin: 12px 0 6px; max-width: 760px; min-height: 8px; }
+.vf-bottom { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 8px; }
+.vf-mic { width: 74px; height: 74px; border-radius: 50%; border: 1px solid rgba(var(--accent-rgb), .5); background: rgba(var(--accent-rgb), .14); color: var(--accent); display: grid; place-items: center; cursor: pointer; box-shadow: 0 0 30px rgba(var(--accent-rgb), .25); transition: transform .15s, box-shadow .2s; }
+.vf-mic svg { width: 30px; height: 30px; }
+.vf-mic:active { transform: scale(.95); }
+.vf-mic.live { background: rgba(var(--accent-rgb), .3); box-shadow: 0 0 0 8px rgba(var(--accent-rgb), .12), 0 0 40px rgba(var(--accent-rgb), .5); animation: trPulse 1.2s ease-in-out infinite; }
+.vf-hint { font-size: 12.5px; color: var(--text-dim); min-height: 16px; }
+html.vf-open .app { visibility: hidden; }
+@media (max-height: 560px) { .voice-full .orb-wrap { width: min(60vw, 46vh); } .vf-me { font-size: 17px; } }
+@media (prefers-reduced-motion: reduce) { .voice-full { animation: none; } .vf-mic.live { animation: none; } }
+/* Phones: the top bar must fit the screen (a too-wide bar makes the browser zoom the whole page out).
+   Share stays in Settings → About. */
+@media (max-width: 560px) {
+  .topbar { gap: 4px; }
+  #shareBtn { display: none; }
+  .topbar .model-chip { max-width: 124px; }
+}
+@media (max-width: 360px) { #fullBtn { display: none; } }

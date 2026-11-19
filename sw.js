@@ -1,6 +1,6 @@
 // Offline support for the web version: the interface is cached so JARVIS opens
 // without internet. Requests to Ollama (another origin) are never touched.
-const VERSION = 'jarvis-15f2447fe4';
+const VERSION = 'jarvis-c6c64a8a05';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/main.js', 'js/util.js', 'js/icons.js', 'js/host.js', 'js/store.js', 'js/ollama.js', 'js/markdown.js', 'js/calc.js',
@@ -12,7 +12,7 @@ const CORE = [
   'js/messaging.js', 'js/briefing.js', 'js/vision.js', 'js/sync.js', 'js/ui/circle.js', 'js/ui/sync.js',
   'js/missions.js', 'js/ui/missions.js',
   'js/links.js', 'js/livesync.js', 'js/ui/links.js',
-  'js/news.js', 'js/lock.js', 'js/notify.js', 'js/creator.js', 'js/pptx.js', 'js/emergency.js', 'js/semantic.js', 'js/languages.js', 'js/ui/command.js', 'js/ui/translate.js',
+  'js/news.js', 'js/lock.js', 'js/notify.js', 'js/creator.js', 'js/pptx.js', 'js/emergency.js', 'js/semantic.js', 'js/languages.js', 'js/ui/command.js', 'js/ui/translate.js', 'js/ui/voicefull.js', 'js/suggest.js',
   'js/automations.js', 'js/documents.js', 'js/features.js', 'js/graph.js', 'js/media.js', 'js/modes.js', 'js/planner.js', 'js/projects.js', 'js/research.js', 'js/search.js', 'js/study.js', 'js/ui/imageedit.js', 'js/ui/planner.js', 'js/ui/projects.js', 'js/ui/search.js',
   'assets/icon-192.png', 'assets/icon-512.png', 'assets/icon-maskable-512.png', 'assets/apple-touch-icon.png', 'assets/favicon-32.png',
 ];
@@ -28,6 +28,7 @@ self.addEventListener('activate', (e) => {
 });
 
 // Network first (so updates arrive right away), cache when offline.
+const savedPages = new Set();   // pages opened from the saved copy (offline): all their files come from it too
 const LIB = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.87/lib/index.js';
 self.addEventListener('fetch', (e) => {
   const req = e.request;
@@ -48,9 +49,25 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
-  // Always ask the server whether a file changed (GitHub caches files for 10 minutes otherwise).
-  e.respondWith(fetch(req, { cache: 'no-cache' }).then((res) => {
+  // Ask the server whether a file changed (GitHub caches files for 10 minutes otherwise).
+  // Opening the app: if the network doesn't answer within 3 seconds (no signal, weak signal),
+  // open the saved copy instead, and then load every file of that page from the saved copy too,
+  // so old and new files are never mixed.
+  const saved = async () => (await caches.match(req, { ignoreSearch: true })) || (req.mode === 'navigate' ? (await caches.match('index.html')) || (await caches.match('./')) : null);
+  const fromNet = () => fetch(req, { cache: 'no-cache' }).then((res) => {
     if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
     return res;
-  }).catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match('index.html'))));
+  });
+  if (req.mode === 'navigate') {
+    e.respondWith(new Promise((resolve) => {
+      let done = false;
+      const finish = (r, offline) => { if (done || !r) return false; done = true; if (offline && e.resultingClientId) savedPages.add(e.resultingClientId); resolve(r); return true; };
+      const timer = setTimeout(async () => finish(await saved(), true), 3000);
+      fromNet().then((res) => { clearTimeout(timer); finish(res, false); })
+        .catch(async () => { clearTimeout(timer); if (!finish(await saved(), true)) finish(Response.error(), false); });
+    }));
+    return;
+  }
+  if (savedPages.has(e.clientId)) { e.respondWith(saved().then((r) => r || fromNet())); return; }
+  e.respondWith(fromNet().catch(async () => (await saved()) || Response.error()));
 });
